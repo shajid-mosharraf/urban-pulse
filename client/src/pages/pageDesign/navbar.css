@@ -1,0 +1,46 @@
+/* Navbar */
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 40px;
+  background-color: black;
+  color: white;
+}
+
+.logo {
+  font-size: 22px;
+  font-weight: bold;
+}
+
+.nav-links a {
+  margin-left: 20px;
+  text-decoration: none;
+  color: white;
+  font-weight: 500;
+}
+
+.signup-btn {
+  background-color: white;
+  color: black !important;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+/* Simple Centered Navbar */
+
+.simple-navbar {
+  height: 70px;
+  height: 70px;
+  background-color: #111; /* same as navbar */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.simple-logo {
+  color: #ff9800; /* navbar accent color */
+  font-size: 28px;
+  letter-spacing: 2px;
+  margin: 0;
+}

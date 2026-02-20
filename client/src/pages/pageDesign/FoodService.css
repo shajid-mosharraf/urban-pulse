@@ -1,0 +1,105 @@
+.food-container {
+  display: flex;
+  height: 100vh;
+}
+
+/* Each section takes 33% */
+.restaurant-section,
+.food-section,
+.cart-section {
+  width: 33.33%;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* LEFT SIDE */
+.restaurant-section {
+  background: #a1ffcd;
+}
+
+.restaurant-item {
+  background: white;
+  padding: 15px;
+  margin-bottom: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.restaurant-item:hover {
+  background: #ff9800;
+  color: white;
+}
+
+.active-restaurant {
+  border: 2px solid #28a745;
+}
+
+/* MIDDLE - FOOD */
+.food-card {
+  background: white;
+  padding: 15px;
+  margin-bottom: 15px;
+  border-radius: 8px;
+  text-align: center;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.food-card img {
+  width: 100%;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+/* RIGHT - CART */
+.cart-section {
+  background: #f5f5f5;
+}
+
+.cart-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  background: white;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.cart-buttons button {
+  margin-left: 5px;
+  padding: 5px 8px;
+  cursor: pointer;
+  border: none;
+  border-radius: 4px;
+}
+
+.cart-buttons button:first-child {
+  background: #ffc107;
+}
+
+.cart-buttons button:last-child {
+  background: crimson;
+  color: white;
+}
+
+.total-price {
+  font-weight: bold;
+  margin-top: 15px;
+}
+
+.confirm-btn {
+  margin-top: 20px;
+  padding: 10px;
+  width: 100%;
+  background: #ff9800;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.confirm-btn:hover {
+  background: #e68900;
+}

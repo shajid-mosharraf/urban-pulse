@@ -1,0 +1,134 @@
+.multi-column-container {
+  display: flex;
+  gap: 20px;
+  padding: 40px;
+  min-height: 80vh;
+}
+
+/* Left column: Welcome text */
+.left-column {
+  flex: 1;
+  color: #00bcd4;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.left-column h1 {
+  font-size: 2.2rem;
+  font-weight: bold;
+  margin-bottom: 15px;
+}
+
+.left-column p {
+  font-size: 1.1rem;
+  line-height: 1.5;
+  color: #555;
+}
+
+/* Middle column: Role selection + form */
+.middle-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Role selection buttons */
+.role-selection {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.role-selection button {
+  padding: 12px 20px;
+  border-radius: 6px;
+  border: none;
+  background-color: #00bcd4;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.role-selection button:hover {
+  background-color: #0097a7;
+}
+
+/* Form styling */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-form input {
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+.auth-form button {
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  background-color: #00bcd4;
+  color: white;
+  cursor: pointer;
+  font-size: 16px;
+  transition: 0.3s;
+}
+
+.auth-form button:hover {
+  background-color: #0097a7;
+}
+
+.role-specific {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.go-back {
+  margin-top: 12px;
+  cursor: pointer;
+  color: #00bcd4;
+  text-decoration: underline;
+}
+
+/* Right column: dynamic image */
+.right-column {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.role-image {
+  width: 100%;
+  border-radius: 12px;
+  max-height: 400px;
+  object-fit: cover;
+}
+
+.profile-preview {
+  margin-top: 10px;
+  max-width: 100px;
+  max-height: 100px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .multi-column-container {
+    flex-direction: column;
+    gap: 30px;
+  }
+  .role-image {
+    max-height: 250px;
+  }
+}

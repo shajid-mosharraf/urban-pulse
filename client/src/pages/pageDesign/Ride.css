@@ -1,0 +1,166 @@
+/* ===== Layout ===== */
+.ride-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  height: calc(100vh - 70px);
+  background: #f4f6f9;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.section {
+  padding: 25px;
+  border-right: 1px solid #ddd;
+  overflow-y: auto;
+}
+
+.section h2 {
+  margin-bottom: 20px;
+}
+
+/* ===== Inputs ===== */
+.section input {
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 15px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  font-size: 14px;
+}
+
+/* ===== Buttons ===== */
+.section button {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  background-color: black;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: 0.3s;
+}
+
+.section button:hover {
+  background-color: #333;
+}
+
+/* ===== Vehicle Cards (Vertical like before) ===== */
+.vehicle-card {
+  padding: 15px;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  cursor: pointer;
+  margin-bottom: 12px;
+  background-color: white;
+  transition: 0.3s;
+}
+
+.vehicle-card:hover {
+  background-color: #f0f0f0;
+}
+
+.vehicle-card.selected {
+  border: 2px solid black;
+  background-color: #eaeaea;
+}
+
+/* ===== Payment Cards ===== */
+.pay-card {
+  padding: 15px;
+  border-radius: 10px;
+  border: 1px solid black;
+  cursor: pointer;
+  margin-bottom: 12px;
+  text-align: center;
+  font-weight: bold;
+  transition: 0.3s;
+}
+
+.pay-card:hover {
+  background: black;
+  color: white;
+}
+
+.pay-card.selected {
+  background: black;
+  color: white;
+}
+
+/* ===== Map Placeholder ===== */
+.map-placeholder {
+  margin-top: 15px;
+  height: 220px;
+  background-color: #ddd;
+  border-radius: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-weight: bold;
+  color: #555;
+}
+
+/* ===== Chat Box (Improved like previous) ===== */
+.chat-box {
+  height: 60%;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 10px;
+  background-color: white;
+  overflow-y: auto;
+  margin-bottom: 15px;
+}
+
+/* User message (right side) */
+.user-msg {
+  text-align: right;
+  background-color: black;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 20px;
+  margin-bottom: 8px;
+  display: inline-block;
+  max-width: 70%;
+  float: right;
+  clear: both;
+}
+
+/* Driver message (left side) */
+.driver-msg {
+  text-align: left;
+  background-color: #e4e6eb;
+  padding: 8px 14px;
+  border-radius: 20px;
+  margin-bottom: 8px;
+  display: inline-block;
+  max-width: 70%;
+  float: left;
+  clear: both;
+}
+
+/* Chat input */
+.chat-input {
+  display: flex;
+  gap: 10px;
+}
+
+.chat-input input {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+
+.chat-input button {
+  padding: 10px 15px;
+  width: auto;
+}
+
+/* ===== Driver Info Box ===== */
+.driver-info {
+  background: white;
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid #ddd;
+  margin-bottom: 15px;
+}
