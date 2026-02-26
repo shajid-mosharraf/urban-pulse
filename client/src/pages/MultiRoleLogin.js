@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import axios from "axios"; // <--- Imported Axios
 
 import "./pageDesign/Auth.css";
 
@@ -8,12 +9,11 @@ import generalImg from "./images/general.jpg";
 import customerImg from "./images/customer.jpeg";
 import driverImg from "./images/driver.jpeg";
 import restaurantImg from "./images/restaurant.jpg";
-import adminImg from "./images/general.jpg"; // add this image
+import adminImg from "./images/general.jpg"; 
 
 function MultiRoleLogin() {
   const [role, setRole] = useState(null);
   const navigate = useNavigate();
-
 
   const [formData, setFormData] = useState({
     email: "",
@@ -30,10 +30,10 @@ function MultiRoleLogin() {
     });
   };
 
-  const handleSubmit = (e) => {
-    
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // 1. Validation (Kept your original logic)
     if (!role) {
         setMessage("Please select a role first.");
         return;
@@ -44,29 +44,59 @@ function MultiRoleLogin() {
         return;
     }
 
-    // ✅ Simulate successful login
-    setMessage("Login successful!");
+    try {
+        // 2. CONNECT TO BACKEND
+        // We send all fields (email, password, phone, role) to the server
+        const response = await axios.post("http://localhost:5000/login", {
+            email: formData.email,
+            password: formData.password,
+            // Sending these too, even if backend only checks email/pass currently
+            phone: formData.phone, 
+            role: role 
+        });
 
-    // Redirect based on role
-    setTimeout(() => {
-        if (role === "customer") {
-        navigate("/customer");
-        } 
-        else if (role === "driver") {
-        navigate("/driver");
-        } 
-        else if (role === "restaurant") {
-        navigate("/restaurant");
-        } 
-        else if (role === "admin") {
-        navigate("/admin");
+        // 3. Success Handling
+        const { user_id, first_name, role: dbRole } = response.data;
+        
+        console.log("Login Success:", response.data);
+        setMessage("Login successful!");
+
+        // Save to Local Storage
+        localStorage.setItem("user_id", user_id);
+        localStorage.setItem("first_name", first_name);
+        localStorage.setItem("role", dbRole); // Save the REAL role from DB
+
+        // 4. Redirect Logic (Using the Backend's confirmed role)
+        setTimeout(() => {
+            if (dbRole === "customer") {
+                navigate("/customer");
+            } 
+            else if (dbRole === "driver") {
+                navigate("/driver");
+            } 
+            else if (dbRole === "restaurant") {
+                navigate("/restaurant");
+            } 
+            else if (dbRole === "admin") {
+                navigate("/admin");
+            }
+            else {
+                // Fallback if role doesn't match specific pages
+                navigate("/home");
+            }
+        }, 1000);
+
+    } catch (err) {
+        console.error(err);
+        if (err.response) {
+            setMessage(err.response.data); // Show backend error (e.g., "User not found")
+        } else {
+            setMessage("Server Error. Is the backend running?");
         }
-    }, 1000);
-    
-
+    }
   };
 
-  // 🔥 Image switching logic
+  // 🔥 Image switching logic (Kept exactly as is)
   let currentImage = generalImg;
 
   if (role === "customer") currentImage = customerImg;
@@ -89,10 +119,10 @@ function MultiRoleLogin() {
         {/* Role Selection */}
         <h2>Select Role</h2>
         <div className="role-selection">
-          <button onClick={() => setRole("customer")}>Customer</button>
-          <button onClick={() => setRole("driver")}>Driver</button>
-          <button onClick={() => setRole("restaurant")}>Restaurant</button>
-          <button onClick={() => setRole("admin")}>Admin</button>
+          <button onClick={() => setRole("customer")} className={role === "customer" ? "active" : ""}>Customer</button>
+          <button onClick={() => setRole("driver")} className={role === "driver" ? "active" : ""}>Driver</button>
+          <button onClick={() => setRole("restaurant")} className={role === "restaurant" ? "active" : ""}>Restaurant</button>
+          <button onClick={() => setRole("admin")} className={role === "admin" ? "active" : ""}>Admin</button>
         </div>
 
         {/* Login Form */}
@@ -128,7 +158,7 @@ function MultiRoleLogin() {
         </form>
 
         {/* Message */}
-        {message && <p className="signup-message">{message}</p>}
+        {message && <p className="signup-message" style={{color: message.includes("successful") ? "green" : "red"}}>{message}</p>}
 
       </div>
 
