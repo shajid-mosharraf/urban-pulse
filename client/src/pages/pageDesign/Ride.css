@@ -164,3 +164,65 @@
   border: 1px solid #ddd;
   margin-bottom: 15px;
 }
+/* --- AUTOCOMPLETE DROPDOWN STYLES --- */
+.autocomplete-wrapper {
+  position: relative;
+  width: 100%;
+  margin-bottom: 15px;
+}
+
+.autocomplete-wrapper input {
+  width: 100%;
+  padding: 10px;
+  box-sizing: border-box;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.suggestions-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 100%;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 1000; /* Extremely important: keeps dropdown above Leaflet */
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.suggestions-list li {
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+}
+
+.suggestions-list li:hover {
+  background-color: #f0f8ff;
+}
+
+/* --- LEAFLET MAP STYLES --- */
+.map-section {
+  padding: 0 !important; /* Removes padding so map fills the box */
+  overflow: hidden;
+}
+
+.leaflet-map-container {
+  height: 350px;
+  width: 100%;
+  border-radius: 8px;
+  z-index: 0; /* Keeps map below the dropdowns */
+}
+
+/* --- UTILITY SELECTION STYLES --- */
+.selected {
+  background-color: #e0f0ff;
+  border-color: #007bff !important;
+}

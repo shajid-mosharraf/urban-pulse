@@ -64,9 +64,9 @@ function MultiRoleLogin() {
         // Save to Local Storage
         localStorage.setItem("user_id", user_id);
         localStorage.setItem("first_name", first_name);
-        localStorage.setItem("role", dbRole); // Save the REAL role from DB
+        localStorage.setItem("role", dbRole); 
 
-        // 4. Redirect Logic (Using the Backend's confirmed role)
+        
         setTimeout(() => {
             if (dbRole === "customer") {
                 navigate("/customer");
