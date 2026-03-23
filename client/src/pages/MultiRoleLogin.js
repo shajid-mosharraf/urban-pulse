@@ -62,9 +62,13 @@ function MultiRoleLogin() {
         setMessage("Login successful!");
 
         // Save to Local Storage
-        localStorage.setItem("user_id", user_id);
-        localStorage.setItem("first_name", first_name);
-        localStorage.setItem("role", dbRole); 
+        // Save as a single JSON object for easy retrieval across the app
+        const userData = {
+            user_id: user_id,
+            first_name: first_name,
+            role: dbRole
+        };
+        localStorage.setItem("user", JSON.stringify(userData));
 
         
         setTimeout(() => {

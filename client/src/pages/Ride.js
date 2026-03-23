@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import { OpenStreetMapProvider } from "leaflet-geosearch";
 import L from "leaflet";
+import io from "socket.io-client";
 import "leaflet/dist/leaflet.css";
 import "./pageDesign/Ride.css";
 
@@ -38,10 +39,14 @@ const destIcon = new L.divIcon({
   iconSize: [22, 22],
   iconAnchor: [11, 11]
 });
+const socket = io("http://localhost:5000");
 
 const RidePage = () => {
   // Free GraphHopper Key
-  const GRAPHHOPPER_KEY = "Eikhane_api_key_ta_bosha"; // Paste your key here
+  const GRAPHHOPPER_KEY = "5aafda93-5123-4de4-a72d-fee29fc1e489"; // Paste your key here
+  const userString = localStorage.getItem("user");
+  const loggedInUser = userString ? JSON.parse(userString) : null;
+  const actualUserId = loggedInUser ? loggedInUser.user_id : null;
 
   // Input & Dropdown States
   const [pickup, setPickup] = useState("");
@@ -68,6 +73,8 @@ const RidePage = () => {
   const [requestTime, setRequestTime] = useState(null);
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  // NEW: Add a bucket to hold the driver's real info
+  const [assignedDriver, setAssignedDriver] = useState(null);
 
   // Refs for Debouncing
   const pickupTimer = useRef(null);
@@ -168,31 +175,82 @@ const RidePage = () => {
     }
   };
 
-  const confirmRide = () => {
+  const confirmRide = async () => {
     if (!selectedVehicle || !paymentMethod) return alert("Select vehicle and payment!");
+    
+    if (!actualUserId) {
+      return alert("You must be logged in as a customer to request a ride!");
+    }
 
-    const ride = {
-      pickup,
-      destination,
-      vehicle: selectedVehicle,
-      price: prices[selectedVehicle],
-      payment: paymentMethod,
+    const rideRequestData = {
+      customer_id: actualUserId, // DYNAMIC USER ID!
+      pickup_name: pickup,
+      pickup_lat: pickupCoords[0],
+      pickup_lng: pickupCoords[1],
+      dropoff_name: destination,
+      dropoff_lat: destCoords[0],
+      dropoff_lng: destCoords[1],
+      service_type: selectedVehicle,
+      distance_km: distance,
+      initial_fare: prices[selectedVehicle],
     };
 
-    setCurrentRide(ride);
-    setRideStatus("waiting");
-    setRequestTime(new Date().toLocaleTimeString());
+    try {
+      const response = await fetch("http://localhost:5000/api/rides/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rideRequestData),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        console.log(`Ride requested! Pinging ${data.nearbyDriversCount} drivers.`);
+        
+        setCurrentRide({
+          ride_id: data.ride.ride_id, // Save the DB ID so we can track it
+          pickup,
+          destination,
+          vehicle: selectedVehicle,
+          price: prices[selectedVehicle],
+          payment: paymentMethod,
+        });
+        
+        setRideStatus("waiting");
+        setRequestTime(new Date().toLocaleTimeString());
+
+        // Tell the socket server that this customer is waiting
+        socket.emit("customer_waiting", data.ride.ride_id);
+      } else {
+        alert("Failed to request ride: " + data.error);
+      }
+    } catch (error) {
+      console.error("Server connection error:", error);
+      alert("Could not connect to the server.");
+    }
   };
 
   useEffect(() => {
-    if (rideStatus === "waiting") {
-      const timer = setTimeout(() => {
-        setRideStatus("picked");
-      }, 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [rideStatus]);
+    // Listen for the backend telling us a driver accepted!
+    socket.on("ride_accepted", (driverDetails) => {
+      // driverDetails will contain the driver's name, phone, and vehicle no.
+      console.log("A driver accepted your ride!", driverDetails);
+      setRideStatus("picked");
+      setAssignedDriver(driverDetails);
+      // Optionally, you can create a new state like 'setAssignedDriver(driverDetails)'
+      // to display their real name instead of "Rahim Uddin" in Section 3.
+    });
+    socket.on("receive_message", (messageData) => {
+      console.log("Customer received message:", messageData); 
+      setMessages((prevMessages) => [...prevMessages, messageData]);
+    });
 
+    // Cleanup the listener when the component unmounts
+    return () => {
+      socket.off("ride_accepted");
+      socket.off("receive_message");
+    };
+  }, []);
   const cancelRide = () => {
     setCurrentRide(null);
     setRideStatus(null);
@@ -205,15 +263,21 @@ const RidePage = () => {
     setRouteLine([]);
     setPickupCoords(null);
     setDestCoords(null);
+    setAssignedDriver(null);
   };
 
   const sendMessage = () => {
-    if (!chatInput) return;
-    setMessages([...messages, { sender: "user", text: chatInput }]);
-    setChatInput("");
-    setTimeout(() => {
-      setMessages((prev) => [...prev, { sender: "driver", text: "On my way 🚗" }]);
-    }, 1500);
+    if (!chatInput || !currentRide) return;
+    
+    const messageData = {
+      ride_id: currentRide.ride_id,
+      sender_id: actualUserId, // NEW: Real DB ID!
+      sender_role: "user",     // Helps the frontend know which color to make the bubble
+      text: chatInput
+    };
+
+    socket.emit("send_message", messageData);
+    setChatInput(""); 
   };
 
   return (
@@ -324,7 +388,10 @@ const RidePage = () => {
       )}
 
       {/* ================= SECTION 3: VEHICLES & DRIVER STATUS ================= */}
+      {/* ================= SECTION 3: VEHICLES & DRIVER STATUS ================= */}
       <div className="section">
+        
+        {/* State 1: Before confirming ride (Show Vehicles) */}
         {!currentRide && prices && (
           <>
             <h2>Select Vehicle</h2>
@@ -344,14 +411,29 @@ const RidePage = () => {
           </>
         )}
 
-        {currentRide && (
+        {/* State 2: Ride Confirmed, Waiting for Driver to Accept */}
+        {currentRide && !assignedDriver && (
           <>
             <h2>Driver Status</h2>
-            <div className="driver-info" style={{ background: "#f0f8ff", padding: "10px", borderRadius: "5px" }}>
-              <p><strong>Name:</strong> Rahim Uddin</p>
-              <p><strong>Vehicle:</strong> DHAKA-METRO-12-3456</p>
-              <p><strong>Rating:</strong> ⭐ 4.8</p>
-              <p><strong>Phone:</strong> 017XXXXXXXX</p>
+            <div className="driver-info" style={{ background: "#fff3cd", padding: "15px", borderRadius: "5px", textAlign: "center" }}>
+              <h4 style={{ margin: 0, color: "#856404" }}>⏳ Request Sent!</h4>
+              <p style={{ margin: "5px 0 0 0", color: "#856404" }}>Waiting for a nearby driver to accept...</p>
+            </div>
+            <button onClick={cancelRide} style={{ marginTop: "15px", backgroundColor: "#dc3545", color: "white", width: "100%" }}>
+              Cancel Request
+            </button>
+          </>
+        )}
+
+        {/* State 3: Driver Accepted! Show their real info */}
+        {currentRide && assignedDriver && (
+          <>
+            <h2>Driver Status</h2>
+            <div className="driver-info" style={{ background: "#d4edda", padding: "10px", borderRadius: "5px", border: "1px solid #c3e6cb" }}>
+              <p><strong>Name:</strong> {assignedDriver.name}</p>
+              <p><strong>Vehicle:</strong> {assignedDriver.vehicle}</p>
+              <p><strong>Rating:</strong> ⭐ {assignedDriver.rating || "5.0"}</p>
+              <p><strong>Phone:</strong> {assignedDriver.phone}</p>
             </div>
             <button onClick={cancelRide} style={{ marginTop: "15px", backgroundColor: "#dc3545", color: "white", width: "100%" }}>
               Cancel Ride
@@ -393,7 +475,14 @@ const RidePage = () => {
             <h2>Chat with Driver</h2>
             <div className="chat-box" style={{ height: "150px", overflowY: "auto", border: "1px solid #ddd", padding: "10px", marginBottom: "10px", borderRadius: "5px", display: "flex", flexDirection: "column", gap: "5px" }}>
               {messages.map((msg, i) => (
-                <div key={i} style={{ alignSelf: msg.sender === "user" ? "flex-end" : "flex-start", background: msg.sender === "user" ? "#007bff" : "#e9ecef", color: msg.sender === "user" ? "white" : "black", padding: "5px 10px", borderRadius: "10px" }}>
+                <div key={i} style={{ 
+                  alignSelf: msg.sender_role === "user" ? "flex-end" : "flex-start", 
+                  background: msg.sender_role === "user" ? "#007bff" : "#e9ecef", 
+                  color: msg.sender_role === "user" ? "white" : "black", 
+                  padding: "5px 10px", 
+                  borderRadius: "10px",
+                  maxWidth: "75%"
+                }}>
                   {msg.text}
                 </div>
               ))}

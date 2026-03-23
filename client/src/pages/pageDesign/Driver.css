@@ -1,0 +1,65 @@
+.driver-container {
+  max-width: 600px;
+  margin: 40px auto;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+}
+
+.driver-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.status-text {
+  font-weight: bold;
+  margin-right: 15px;
+}
+
+.btn-start { background-color: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+.btn-stop { background-color: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
+
+/* Radar Animation */
+.radar-container {
+  text-align: center;
+  margin-top: 50px;
+}
+.radar {
+  width: 80px;
+  height: 80px;
+  background-color: #007bff;
+  border-radius: 50%;
+  margin: 0 auto 20px auto;
+  animation: pulse 1.5s infinite;
+}
+@keyframes pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 123, 255, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(0, 123, 255, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 123, 255, 0); }
+}
+
+/* Incoming Request Card */
+.incoming-request-card {
+  background: white;
+  border: 2px solid #007bff;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+  animation: slideDown 0.3s ease-out;
+}
+@keyframes slideDown {
+  from { transform: translateY(-20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.request-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+.price-tag { font-size: 24px; font-weight: bold; color: #28a745; }
+.request-details { margin: 20px 0; font-size: 16px; line-height: 1.6; }
+.request-actions { display: flex; gap: 10px; }
+.btn-decline { flex: 1; padding: 15px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; font-weight: bold; }
+.btn-accept { flex: 2; padding: 15px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 18px; font-weight: bold; }
+.btn-accept:hover { background: #0056b3; }
+
+/* Active Ride */
+.active-ride-card { background: #e0f8e9; padding: 20px; border-radius: 10px; border: 1px solid #28a745; }
+.btn-complete { margin-top: 20px; width: 100%; padding: 15px; background: #28a745; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
