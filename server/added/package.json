@@ -1,0 +1,18 @@
+{
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "nodemon": "^3.1.11",
+    "pg": "^8.17.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-router-dom": "^7.13.0",
+    "react-scripts": "^5.0.1",
+    "socket.io": "^4.8.3",
+    "web-vitals": "^5.1.0"
+  }
+}

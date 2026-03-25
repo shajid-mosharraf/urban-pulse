@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-
 import { OpenStreetMapProvider } from "leaflet-geosearch";
 import L from "leaflet";
 import io from "socket.io-client";
+import { useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import "./pageDesign/Ride.css";
 
@@ -42,11 +43,13 @@ const destIcon = new L.divIcon({
 const socket = io("http://localhost:5000");
 
 const RidePage = () => {
+  const navigate = useNavigate();
   // Free GraphHopper Key
   const GRAPHHOPPER_KEY = "5aafda93-5123-4de4-a72d-fee29fc1e489"; // Paste your key here
   const userString = localStorage.getItem("user");
   const loggedInUser = userString ? JSON.parse(userString) : null;
   const actualUserId = loggedInUser ? loggedInUser.user_id : null;
+  const accessToken = localStorage.getItem("accessToken");
 
   // Input & Dropdown States
   const [pickup, setPickup] = useState("");
@@ -75,6 +78,10 @@ const RidePage = () => {
   const [chatInput, setChatInput] = useState("");
   // NEW: Add a bucket to hold the driver's real info
   const [assignedDriver, setAssignedDriver] = useState(null);
+  const [pickupOtpCode, setPickupOtpCode] = useState(null);
+  const [completionOtpCode, setCompletionOtpCode] = useState(null);
+  const [completionOtpInput, setCompletionOtpInput] = useState("");
+  const [completionMessage, setCompletionMessage] = useState("");
 
   // Refs for Debouncing
   const pickupTimer = useRef(null);
@@ -87,6 +94,41 @@ const RidePage = () => {
     micro: { base: 100, perKm: 30 },
   };
 
+  const confirmCompletionOtp = async () => {
+    if (!actualUserId || !currentRide?.ride_id) {
+      return;
+    }
+
+    try {
+      setCompletionMessage("");
+      const response = await fetch(
+        `http://localhost:5000/api/customer/${actualUserId}/rides/${currentRide.ride_id}/confirm`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: accessToken ? `Bearer ${accessToken}` : "",
+          },
+          credentials: "include",
+          body: JSON.stringify({ otp: completionOtpInput }),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || "Unable to confirm completion OTP.");
+      }
+
+      setCompletionMessage("Ride completed successfully.");
+      setRideStatus("completed");
+      setCompletionOtpInput("");
+      setTimeout(() => {
+        navigate("/dashboard/customer");
+      }, 1000);
+    } catch (err) {
+      setCompletionMessage(err.message || "Unable to confirm completion OTP.");
+    }
+  };
   
   const geoProvider = new OpenStreetMapProvider({
     params: {
@@ -193,22 +235,29 @@ const RidePage = () => {
       service_type: selectedVehicle,
       distance_km: distance,
       initial_fare: prices[selectedVehicle],
+      payment_method: paymentMethod,
     };
 
     try {
       const response = await fetch("http://localhost:5000/api/rides/request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        },
+        credentials: "include",
         body: JSON.stringify(rideRequestData),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
-        console.log(`Ride requested! Pinging ${data.nearbyDriversCount} drivers.`);
+      if (response.ok && data?.success) {
+        const payload = data.data || {};
+        const createdRide = payload.ride || {};
+        console.log(`Ride requested! Pinging ${payload.nearbyDriversCount || 0} drivers.`);
         
         setCurrentRide({
-          ride_id: data.ride.ride_id, // Save the DB ID so we can track it
+          ride_id: createdRide.ride_id, // Save the DB ID so we can track it
           pickup,
           destination,
           vehicle: selectedVehicle,
@@ -216,13 +265,15 @@ const RidePage = () => {
           payment: paymentMethod,
         });
         
-        setRideStatus("waiting");
+        setRideStatus("waiting_driver");
         setRequestTime(new Date().toLocaleTimeString());
 
         // Tell the socket server that this customer is waiting
-        socket.emit("customer_waiting", data.ride.ride_id);
+        if (createdRide.ride_id) {
+          socket.emit("customer_waiting", createdRide.ride_id);
+        }
       } else {
-        alert("Failed to request ride: " + data.error);
+        alert("Failed to request ride: " + (data?.message || "Unknown error"));
       }
     } catch (error) {
       console.error("Server connection error:", error);
@@ -233,13 +284,40 @@ const RidePage = () => {
   useEffect(() => {
     // Listen for the backend telling us a driver accepted!
     socket.on("ride_accepted", (driverDetails) => {
-      // driverDetails will contain the driver's name, phone, and vehicle no.
       console.log("A driver accepted your ride!", driverDetails);
-      setRideStatus("picked");
+      setRideStatus("driver_assigned");
       setAssignedDriver(driverDetails);
-      // Optionally, you can create a new state like 'setAssignedDriver(driverDetails)'
-      // to display their real name instead of "Rahim Uddin" in Section 3.
+      if (driverDetails?.pickup_otp) {
+        setPickupOtpCode(driverDetails.pickup_otp);
+      }
     });
+
+    socket.on("ride_picked_up", () => {
+      setRideStatus("picked_up");
+    });
+
+    socket.on("ride_driver_completed", (payload) => {
+      setRideStatus("waiting_completion_otp");
+      if (payload?.completion_otp) {
+        setCompletionOtpCode(payload.completion_otp);
+      }
+    });
+
+    socket.on("ride_completed", () => {
+      setRideStatus("completed");
+      setTimeout(() => {
+        navigate("/dashboard/customer");
+      }, 1200);
+    });
+
+    socket.on("ride_cancelled", () => {
+      setRideStatus("cancelled");
+      setTimeout(() => {
+        cancelRideLocal();
+        navigate("/dashboard/customer");
+      }, 800);
+    });
+
     socket.on("receive_message", (messageData) => {
       console.log("Customer received message:", messageData); 
       setMessages((prevMessages) => [...prevMessages, messageData]);
@@ -248,10 +326,15 @@ const RidePage = () => {
     // Cleanup the listener when the component unmounts
     return () => {
       socket.off("ride_accepted");
+      socket.off("ride_picked_up");
+      socket.off("ride_driver_completed");
+      socket.off("ride_completed");
+      socket.off("ride_cancelled");
       socket.off("receive_message");
     };
-  }, []);
-  const cancelRide = () => {
+  }, [navigate]);
+
+  const cancelRideLocal = () => {
     setCurrentRide(null);
     setRideStatus(null);
     setPrices(null);
@@ -264,6 +347,38 @@ const RidePage = () => {
     setPickupCoords(null);
     setDestCoords(null);
     setAssignedDriver(null);
+    setPickupOtpCode(null);
+    setCompletionOtpCode(null);
+    setCompletionOtpInput("");
+    setCompletionMessage("");
+  };
+
+  const cancelRide = async () => {
+    if (!currentRide?.ride_id) {
+      cancelRideLocal();
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/rides/${currentRide.ride_id}/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        },
+        credentials: "include",
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || "Unable to cancel ride.");
+      }
+
+      cancelRideLocal();
+      navigate("/dashboard/customer");
+    } catch (err) {
+      alert(err.message || "Unable to cancel ride.");
+    }
   };
 
   const sendMessage = () => {
@@ -272,7 +387,7 @@ const RidePage = () => {
     const messageData = {
       ride_id: currentRide.ride_id,
       sender_id: actualUserId, // NEW: Real DB ID!
-      sender_role: "user",     // Helps the frontend know which color to make the bubble
+      sender_role: "customer", // Helps the frontend know which color to make the bubble
       text: chatInput
     };
 
@@ -336,13 +451,22 @@ const RidePage = () => {
         ) : (
           <>
             <h2>Ride Info</h2>
-            <p><strong>Status:</strong> {rideStatus === "waiting" ? "Waiting for driver..." : "Picked Up"}</p>
+            <p><strong>Status:</strong> {
+              rideStatus === "waiting_driver" ? "Waiting for driver..." :
+              rideStatus === "driver_assigned" ? "Driver Assigned" :
+              rideStatus === "picked_up" ? "Picked Up" :
+              rideStatus === "waiting_completion_otp" ? "Waiting completion confirmation" :
+              rideStatus === "completed" ? "Completed" :
+              rideStatus === "cancelled" ? "Cancelled" : "Pending"
+            }</p>
             <p><strong>Time:</strong> {requestTime}</p>
             <p><strong>From:</strong> {currentRide.pickup}</p>
             <p><strong>To:</strong> {currentRide.destination}</p>
             <p><strong>Distance:</strong> {distance} km</p>
             <p><strong>Price:</strong> ৳ {currentRide.price}</p>
             <p><strong>Payment:</strong> {currentRide.payment}</p>
+            {pickupOtpCode && <p><strong>Pickup OTP:</strong> {pickupOtpCode}</p>}
+            {completionOtpCode && <p><strong>Completion OTP:</strong> {completionOtpCode}</p>}
           </>
         )}
       </div>
@@ -412,7 +536,7 @@ const RidePage = () => {
         )}
 
         {/* State 2: Ride Confirmed, Waiting for Driver to Accept */}
-        {currentRide && !assignedDriver && (
+        {currentRide && !assignedDriver && rideStatus === "waiting_driver" && (
           <>
             <h2>Driver Status</h2>
             <div className="driver-info" style={{ background: "#fff3cd", padding: "15px", borderRadius: "5px", textAlign: "center" }}>
@@ -426,7 +550,7 @@ const RidePage = () => {
         )}
 
         {/* State 3: Driver Accepted! Show their real info */}
-        {currentRide && assignedDriver && (
+        {currentRide && assignedDriver && ["driver_assigned", "picked_up", "waiting_completion_otp"].includes(rideStatus) && (
           <>
             <h2>Driver Status</h2>
             <div className="driver-info" style={{ background: "#d4edda", padding: "10px", borderRadius: "5px", border: "1px solid #c3e6cb" }}>
@@ -434,10 +558,35 @@ const RidePage = () => {
               <p><strong>Vehicle:</strong> {assignedDriver.vehicle}</p>
               <p><strong>Rating:</strong> ⭐ {assignedDriver.rating || "5.0"}</p>
               <p><strong>Phone:</strong> {assignedDriver.phone}</p>
+              {pickupOtpCode && <p><strong>Pickup OTP:</strong> {pickupOtpCode}</p>}
+              {completionOtpCode && <p><strong>Completion OTP:</strong> {completionOtpCode}</p>}
+              {rideStatus === "waiting_completion_otp" && (
+                <div style={{ marginTop: "8px" }}>
+                  <p style={{ margin: "6px 0" }}><strong>Enter completion OTP to finish ride:</strong></p>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <input
+                      value={completionOtpInput}
+                      onChange={(e) => setCompletionOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="Enter completion OTP"
+                      inputMode="numeric"
+                      maxLength={6}
+                      style={{ flex: 1, minWidth: 0, marginBottom: 0 }}
+                    />
+                    <button onClick={confirmCompletionOtp} style={{ width: "auto", marginTop: 0, padding: "10px 14px" }}>Confirm</button>
+                  </div>
+                  {completionMessage && (
+                    <p style={{ marginTop: "8px", color: completionMessage.toLowerCase().includes("success") ? "#198754" : "#dc3545" }}>
+                      {completionMessage}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
-            <button onClick={cancelRide} style={{ marginTop: "15px", backgroundColor: "#dc3545", color: "white", width: "100%" }}>
-              Cancel Ride
-            </button>
+            {rideStatus === "driver_assigned" && (
+              <button onClick={cancelRide} style={{ marginTop: "15px", backgroundColor: "#dc3545", color: "white", width: "100%" }}>
+                Cancel Ride
+              </button>
+            )}
           </>
         )}
       </div>
@@ -470,15 +619,15 @@ const RidePage = () => {
               </button>
             )}
           </>
-        ) : rideStatus === "picked" ? (
+        ) : ["driver_assigned", "picked_up", "waiting_completion_otp"].includes(rideStatus) ? (
           <>
             <h2>Chat with Driver</h2>
             <div className="chat-box" style={{ height: "150px", overflowY: "auto", border: "1px solid #ddd", padding: "10px", marginBottom: "10px", borderRadius: "5px", display: "flex", flexDirection: "column", gap: "5px" }}>
               {messages.map((msg, i) => (
                 <div key={i} style={{ 
-                  alignSelf: msg.sender_role === "user" ? "flex-end" : "flex-start", 
-                  background: msg.sender_role === "user" ? "#007bff" : "#e9ecef", 
-                  color: msg.sender_role === "user" ? "white" : "black", 
+                  alignSelf: msg.sender_role === "customer" ? "flex-end" : "flex-start", 
+                  background: msg.sender_role === "customer" ? "#007bff" : "#e9ecef", 
+                  color: msg.sender_role === "customer" ? "white" : "black", 
                   padding: "5px 10px", 
                   borderRadius: "10px",
                   maxWidth: "75%"

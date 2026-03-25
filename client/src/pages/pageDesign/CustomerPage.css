@@ -1,7 +1,7 @@
 .customer-wrapper {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  min-height: 100vh;
 }
 
 .customer-container {
@@ -9,35 +9,38 @@
   flex: 1;
 }
 
-
-/* LEFT SIDE */
 .sidebar {
-  width: 20%;
+  width: 260px;
   background-color: #111;
   color: white;
-  padding: 40px;
+  padding: 28px 20px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
 }
 
 .sidebar h2 {
-  margin-bottom: 30px;
+  margin-bottom: 18px;
 }
 
 .sidebar button {
-  padding: 15px;
-  font-size: 16px;
+  padding: 12px;
+  font-size: 15px;
   border: none;
   cursor: pointer;
   background-color: #222;
   color: white;
-  border-radius: 6px;
-  transition: 0.3s;
+  border-radius: 8px;
+  transition: 0.2s;
+  text-align: left;
 }
 
 .sidebar button:hover {
-  background-color: #ff9800;
+  background-color: #0a8f9d;
+}
+
+.sidebar button.active-nav {
+  background-color: #0a8f9d;
 }
 
 .logout-btn {
@@ -45,15 +48,55 @@
   background-color: crimson;
 }
 
-/* RIGHT SIDE */
-.services-section {
-  width: 80%;
+.customer-main {
+  flex: 1;
+  padding: 24px;
+  background-color: #f4f7f8;
+}
+
+.section-error {
+  margin: 0 0 10px;
+  color: #b30000;
+  font-weight: 600;
+}
+
+.section-success {
+  margin: 0 0 10px;
+  color: #0c7f28;
+  font-weight: 600;
+}
+
+.section-message {
+  margin: 0;
+  color: #2f4f4f;
+}
+
+.dashboard-metrics {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 30px;
-  padding: 50px;
-  background-color: #f5f5f5;
-  align-content: center;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metric-card {
+  background: #fff;
+  border: 1px solid #dbe6ea;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.metric-card h4 {
+  margin: 0 0 8px;
+}
+
+.metric-card p {
+  margin: 0;
+}
+
+.services-section {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .service-card {
@@ -61,13 +104,13 @@
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  transition: 0.3s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: 0.2s;
   text-align: center;
 }
 
 .service-card:hover {
-  transform: scale(1.05);
+  transform: translateY(-3px);
 }
 
 .service-card img {
@@ -77,5 +120,85 @@
 }
 
 .service-card h3 {
-  padding: 15px;
+  padding: 14px;
+  margin: 0;
+}
+
+.details-panel {
+  background: #fff;
+  border: 1px solid #dbe6ea;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.details-panel h3,
+.details-panel h4 {
+  margin-top: 0;
+}
+
+.info-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.info-list li {
+  margin-bottom: 8px;
+}
+
+.wallet-recharge-row {
+  display: grid;
+  grid-template-columns: 1fr 180px 140px;
+  gap: 10px;
+  margin: 12px 0 18px;
+}
+
+.wallet-recharge-row input,
+.wallet-recharge-row select,
+.profile-form-grid input {
+  padding: 10px;
+  border: 1px solid #c8d6db;
+  border-radius: 8px;
+}
+
+.wallet-recharge-row button,
+.primary-action {
+  border: none;
+  border-radius: 8px;
+  background: #0a8f9d;
+  color: #fff;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.wallet-recharge-row button:disabled,
+.primary-action:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.profile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 980px) {
+  .customer-container {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+  }
+
+  .dashboard-metrics,
+  .services-section,
+  .profile-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-recharge-row {
+    grid-template-columns: 1fr;
+  }
 }

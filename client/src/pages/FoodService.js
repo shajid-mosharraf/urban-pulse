@@ -95,7 +95,7 @@ const FoodServicePage = () => {
     setSelectedRestaurant(null);
 
     setTimeout(() => {
-      navigate("/customer");
+      navigate("/dashboard/customer");
     }, 1500);
   };
 

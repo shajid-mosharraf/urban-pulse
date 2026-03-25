@@ -85,6 +85,27 @@
   background-color: #0097a7;
 }
 
+.auth-form button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.text-link-btn {
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #007b8a;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.95rem;
+  text-decoration: underline;
+}
+
+.text-link-btn:hover {
+  color: #005f6b;
+}
+
 .role-specific {
   display: flex;
   flex-direction: column;

@@ -87,7 +87,7 @@ function MultiRoleSignUp() {
       // For now, we are sending JSON text data.
       const payload = { ...formData, role: role };
 
-      const response = await axios.post("http://localhost:5000/register", payload);
+      const response = await axios.post("http://localhost:5000/api/register", payload);
 
       console.log("Success:", response.data);
       alert(`Account created successfully! Please login.`);
@@ -96,7 +96,7 @@ function MultiRoleSignUp() {
     } catch (err) {
       console.error(err);
       if (err.response) {
-        alert("Error: " + err.response.data);
+        alert("Error: " + (err.response.data?.message || "Registration failed"));
       } else {
         alert("Server Error. Check console logs.");
       }

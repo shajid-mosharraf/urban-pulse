@@ -10,6 +10,7 @@ const DriverDashboard = () => {
   const userString = localStorage.getItem("user");
   const loggedInDriver = userString ? JSON.parse(userString) : null;
   const driverId = loggedInDriver ? loggedInDriver.user_id : null;
+  const accessToken = localStorage.getItem("accessToken");
 
   // 2. Component State
   const [isOnline, setIsOnline] = useState(false);
@@ -100,23 +101,27 @@ const DriverDashboard = () => {
       // Send a request to the backend to officially claim this ride
       const response = await fetch("http://localhost:5000/api/rides/accept", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        },
+        credentials: "include",
         body: JSON.stringify({
           ride_id: incomingRide.ride_id,
-          driver_id: driverId,
         }),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
+      if (response.ok && data?.success) {
+        const payload = data.data || {};
         // We got it! Move from "incoming" to "active"
         setActiveRide(incomingRide);
         setIncomingRide(null);
         socket.emit("join_ride_room", incomingRide.ride_id);
         
         // SAFE FALLBACK: If driverDetails is missing, use an empty object so it doesn't crash!
-        const safeDriver = data.driverDetails || {};
+        const safeDriver = payload.driverDetails || {};
 
         // Tell the server to notify the customer that we accepted!
         socket.emit("ride_accepted_by_driver", {
@@ -129,7 +134,7 @@ const DriverDashboard = () => {
           }
         });
       } else {
-        alert("Sorry, another driver accepted this ride first! " + (data.error || ""));
+        alert("Sorry, another driver accepted this ride first! " + (data?.message || ""));
         setIncomingRide(null);
       }
     } catch (error) {

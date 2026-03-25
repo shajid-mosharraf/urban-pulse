@@ -15,88 +15,147 @@ function MultiRoleLogin() {
   const [role, setRole] = useState(null);
   const navigate = useNavigate();
 
-  const [formData, setFormData] = useState({
+  const [loginData, setLoginData] = useState({
     email: "",
-    phone: "",
     password: ""
   });
 
+  const [forgotData, setForgotData] = useState({
+    phone: "",
+    newPassword: "",
+    confirmPassword: ""
+  });
+
+  const [isForgotMode, setIsForgotMode] = useState(false);
+  const [loading, setLoading] = useState(false);
+
   const [message, setMessage] = useState("");
 
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
+  const handleLoginChange = (e) => {
+    setLoginData({
+      ...loginData,
       [e.target.name]: e.target.value
     });
   };
 
-  const handleSubmit = async (e) => {
+  const handleForgotChange = (e) => {
+    setForgotData({
+      ...forgotData,
+      [e.target.name]: e.target.value
+    });
+  };
+
+  const isValidPhone = (phone) => {
+    const cleaned = String(phone || "").replace(/[^0-9]/g, "");
+    return cleaned.length >= 10 && cleaned.length <= 15;
+  };
+
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
 
-    // 1. Validation (Kept your original logic)
     if (!role) {
         setMessage("Please select a role first.");
         return;
     }
 
-    if (!formData.email || !formData.phone || !formData.password) {
-        setMessage("All fields are required.");
+    if (!loginData.email || !loginData.password) {
+        setMessage("Email and password are required.");
         return;
     }
 
     try {
-        // 2. CONNECT TO BACKEND
-        // We send all fields (email, password, phone, role) to the server
-        const response = await axios.post("http://localhost:5000/login", {
-            email: formData.email,
-            password: formData.password,
-            // Sending these too, even if backend only checks email/pass currently
-            phone: formData.phone, 
+        setLoading(true);
+        const response = await axios.post("http://localhost:5000/api/auth/login", {
+            email: loginData.email,
+            password: loginData.password,
             role: role 
+        }, {
+          withCredentials: true
         });
 
-        // 3. Success Handling
-        const { user_id, first_name, role: dbRole } = response.data;
+        const user = response.data?.data?.user;
+        const accessToken = response.data?.data?.accessToken;
         
         console.log("Login Success:", response.data);
-        setMessage("Login successful!");
+        setMessage(response.data?.message || "Login successful!");
 
-        // Save to Local Storage
-        // Save as a single JSON object for easy retrieval across the app
+        if (!user) {
+          setMessage("Login succeeded but user data is missing.");
+          return;
+        }
+
         const userData = {
-            user_id: user_id,
-            first_name: first_name,
-            role: dbRole
+            user_id: user.user_id,
+            first_name: user.first_name,
+            role: user.activeRole || role,
+            roles: user.roles || []
         };
         localStorage.setItem("user", JSON.stringify(userData));
+        if (accessToken) {
+          localStorage.setItem("accessToken", accessToken);
+        }
 
-        
         setTimeout(() => {
-            if (dbRole === "customer") {
-                navigate("/customer");
-            } 
-            else if (dbRole === "driver") {
-                navigate("/driver");
-            } 
-            else if (dbRole === "restaurant") {
-                navigate("/restaurant");
-            } 
-            else if (dbRole === "admin") {
-                navigate("/admin");
-            }
-            else {
-                // Fallback if role doesn't match specific pages
-                navigate("/home");
-            }
+          navigate("/dashboard");
         }, 1000);
 
     } catch (err) {
         console.error(err);
         if (err.response) {
-            setMessage(err.response.data); // Show backend error (e.g., "User not found")
+            setMessage(err.response.data?.message || "Login failed.");
         } else {
             setMessage("Server Error. Is the backend running?");
         }
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  const handleForgotSubmit = async (e) => {
+    e.preventDefault();
+
+    const { phone, newPassword, confirmPassword } = forgotData;
+
+    if (!phone || !newPassword || !confirmPassword) {
+      setMessage("All fields are required.");
+      return;
+    }
+
+    if (!isValidPhone(phone)) {
+      setMessage("Please enter a valid phone number.");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setMessage("New password must be at least 6 characters.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setMessage("New password and confirm password do not match.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await axios.post("http://localhost:5000/api/auth/forgot-password", {
+        phone,
+        newPassword,
+        confirmPassword
+      });
+
+      setMessage(response.data?.message || "Password updated successfully. Please login.");
+      setIsForgotMode(false);
+      setForgotData({ phone: "", newPassword: "", confirmPassword: "" });
+    } catch (err) {
+      console.error(err);
+      if (err.response) {
+        setMessage(err.response.data?.message || "Unable to reset password.");
+      } else {
+        setMessage("Server Error. Is the backend running?");
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -129,37 +188,85 @@ function MultiRoleLogin() {
           <button onClick={() => setRole("admin")} className={role === "admin" ? "active" : ""}>Admin</button>
         </div>
 
-        {/* Login Form */}
-        <form className="auth-form" onSubmit={handleSubmit}>
+        {!isForgotMode ? (
+          <>
+            <form className="auth-form" onSubmit={handleLoginSubmit}>
+              <input
+                type="email"
+                name="email"
+                placeholder="Email"
+                value={loginData.email}
+                onChange={handleLoginChange}
+              />
 
-          <input
-            type="email"
-            name="email"
-            placeholder="Email"
-            value={formData.email}
-            onChange={handleChange}
-          />
+              <input
+                type="password"
+                name="password"
+                placeholder="Password"
+                value={loginData.password}
+                onChange={handleLoginChange}
+              />
 
-          <input
-            type="text"
-            name="phone"
-            placeholder="Phone Number"
-            value={formData.phone}
-            onChange={handleChange}
-          />
+              <button type="submit" disabled={loading}>
+                {loading ? "Logging in..." : "Login"}
+              </button>
+            </form>
 
-          <input
-            type="password"
-            name="password"
-            placeholder="Password"
-            value={formData.password}
-            onChange={handleChange}
-          />
+            <button
+              type="button"
+              className="text-link-btn"
+              onClick={() => {
+                setMessage("");
+                setIsForgotMode(true);
+              }}
+            >
+              Forgot Password?
+            </button>
+          </>
+        ) : (
+          <>
+            <form className="auth-form" onSubmit={handleForgotSubmit}>
+              <input
+                type="text"
+                name="phone"
+                placeholder="Phone Number"
+                value={forgotData.phone}
+                onChange={handleForgotChange}
+              />
 
-          <button type="submit">
-            Login
-          </button>
-        </form>
+              <input
+                type="password"
+                name="newPassword"
+                placeholder="Set New Password"
+                value={forgotData.newPassword}
+                onChange={handleForgotChange}
+              />
+
+              <input
+                type="password"
+                name="confirmPassword"
+                placeholder="Confirm New Password"
+                value={forgotData.confirmPassword}
+                onChange={handleForgotChange}
+              />
+
+              <button type="submit" disabled={loading}>
+                {loading ? "Updating..." : "Update Password"}
+              </button>
+            </form>
+
+            <button
+              type="button"
+              className="text-link-btn"
+              onClick={() => {
+                setMessage("");
+                setIsForgotMode(false);
+              }}
+            >
+              Back to Login
+            </button>
+          </>
+        )}
 
         {/* Message */}
         {message && <p className="signup-message" style={{color: message.includes("successful") ? "green" : "red"}}>{message}</p>}
