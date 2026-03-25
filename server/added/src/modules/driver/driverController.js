@@ -209,6 +209,30 @@ const endRide = async (req, res) => {
   }
 };
 
+const switchActiveVehicle = async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    const vehicleId = Number(req.body?.vehicle_id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return sendError(res, 400, "Valid user ID required.");
+    }
+
+    if (!Number.isInteger(vehicleId) || vehicleId <= 0) {
+      return sendError(res, 400, "Valid vehicle ID required.");
+    }
+
+    const data = await driverService.switchActiveVehicle(userId, vehicleId);
+    return sendSuccess(res, 200, "Active vehicle switched successfully.", data);
+  } catch (err) {
+    return sendError(
+      res,
+      err.status || 500,
+      err.message || "Failed to switch vehicle."
+    );
+  }
+};
+
 module.exports = {
   getDashboard,
   acceptRide,
@@ -217,4 +241,5 @@ module.exports = {
   updateLocation,
   startRide,
   endRide,
+  switchActiveVehicle,
 };

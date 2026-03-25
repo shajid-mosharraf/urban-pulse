@@ -227,6 +227,9 @@ const insertRoleSpecificData = async (client, userId, normalizedRole, fields, fi
       });
     }
 
+    // Normalize vehicle type to lowercase for consistency
+    const normalizedVehicleType = String(vehicleType || "").trim().toLowerCase();
+
     // Insert into Driver table
     await client.query(
       `INSERT INTO "drivers" (user_id, licence_id, documents_url, license_expire, active_status, is_approved)
@@ -234,12 +237,24 @@ const insertRoleSpecificData = async (client, userId, normalizedRole, fields, fi
       [userId, licenseId, licenseDocUrl, licenseExpire]
     );
 
-    // Insert into Vehicle table
-    await client.query(
+    // Insert into Vehicle table and set it as the current vehicle
+    const vehicleResult = await client.query(
       `INSERT INTO "vehicles" (owner_id, licence_no, model, type, color, active)
-       VALUES ($1, $2, $3, $4, $5, true)`,
-      [userId, vehiclePlate, vehicleModel, vehicleType, vehicleColor]
+       VALUES ($1, $2, $3, $4, $5, true)
+       RETURNING vehicle_id`,
+      [userId, vehiclePlate, vehicleModel, normalizedVehicleType, vehicleColor]
     );
+
+    // Set the newly created vehicle as the driver's current vehicle
+    if (vehicleResult.rows.length > 0) {
+      const vehicleId = vehicleResult.rows[0].vehicle_id;
+      await client.query(
+        `UPDATE drivers 
+         SET current_vehicle_id = $1 
+         WHERE user_id = $2`,
+        [vehicleId, userId]
+      );
+    }
 
   } else if (normalizedRole === "restaurant") {
     // Insert into owners/restaurant manager table

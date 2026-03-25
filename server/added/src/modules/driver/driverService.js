@@ -46,12 +46,19 @@ const backfillLegacyPendingAssignmentsForDriver = async (driverId) => {
        FROM rides r
        JOIN locations pu ON pu.location_id = r.pickup_location_id
        JOIN drivers d ON d.user_id = $1
+       JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id
        WHERE LOWER(r.status) = 'requested'
          AND r.driver_id IS NULL
          AND d.active_status = TRUE
          AND COALESCE(d.is_approved, TRUE) = TRUE
          AND d.current_latitude IS NOT NULL
          AND d.current_longitude IS NOT NULL
+         AND COALESCE(v.active, TRUE) = TRUE
+         AND r.service_type IS NOT NULL
+         AND v.type IS NOT NULL
+         AND LENGTH(TRIM(r.service_type)) > 0
+         AND LENGTH(TRIM(v.type)) > 0
+         AND LOWER(TRIM(v.type)) = LOWER(TRIM(r.service_type))
          AND NOT EXISTS (
            SELECT 1
            FROM rides ar
@@ -170,26 +177,8 @@ const getDriverDashboardData = async (userId) => {
     );
   } catch (err) {
     if (String(err?.message || "").toLowerCase().includes("relation \"ride_driver_requests\" does not exist")) {
-      incomingRequestsResult = await query(
-        `SELECT
-           r.ride_id,
-           r.distance_km,
-           r.initial_fare,
-           r.service_type,
-           r.request_time,
-           pu.address_name AS pickup,
-           du.address_name AS dropoff,
-           NULL::INT AS priority_rank,
-           NULL::DECIMAL AS driver_distance_km,
-           NULL::DECIMAL AS rating_snapshot
-         FROM rides r
-         LEFT JOIN locations pu ON pu.location_id = r.pickup_location_id
-         LEFT JOIN locations du ON du.location_id = r.dropoff_location_id
-         WHERE LOWER(r.status) = 'requested'
-           AND r.driver_id IS NULL
-         ORDER BY r.request_time DESC
-         LIMIT 5`
-      );
+      // Avoid sending unfiltered ride requests when the routing table is missing.
+      incomingRequestsResult = { rows: [] };
     } else {
       throw err;
     }
@@ -693,6 +682,63 @@ const updateGPSLocation = async (driverId, latitude, longitude) => {
   }
 };
 
+const switchActiveVehicle = async (driverId, vehicleId) => {
+  const client = await getClient();
+
+  try {
+    await client.query("BEGIN");
+
+    // Verify the driver exists
+    const driverCheck = await client.query(
+      `SELECT user_id FROM drivers WHERE user_id = $1`,
+      [driverId]
+    );
+
+    if (driverCheck.rows.length === 0) {
+      throw { status: 404, message: "Driver not found." };
+    }
+
+    // Verify the vehicle exists and belongs to this driver
+    const vehicleCheck = await client.query(
+      `SELECT vehicle_id, type, model, licence_no, color
+       FROM vehicles
+       WHERE vehicle_id = $1 AND owner_id = $2 AND active = TRUE`,
+      [vehicleId, driverId]
+    );
+
+    if (vehicleCheck.rows.length === 0) {
+      throw { status: 404, message: "Vehicle not found or is not owned by this driver." };
+    }
+
+    const vehicle = vehicleCheck.rows[0];
+
+    // Update the driver's current_vehicle_id
+    const updateResult = await client.query(
+      `UPDATE drivers
+       SET current_vehicle_id = $1
+       WHERE user_id = $2
+       RETURNING user_id, current_vehicle_id`,
+      [vehicleId, driverId]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      user_id: updateResult.rows[0].user_id,
+      current_vehicle_id: updateResult.rows[0].current_vehicle_id,
+      vehicle_type: vehicle.type,
+      vehicle_model: vehicle.model,
+      vehicle_plate: vehicle.licence_no,
+      message: `Active vehicle switched to ${vehicle.model} (${vehicle.type})`,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getDriverDashboardData,
   acceptRideRequest,
@@ -701,4 +747,5 @@ module.exports = {
   updateGPSLocation,
   startActiveRide,
   endActiveRide,
+  switchActiveVehicle,
 };

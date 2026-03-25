@@ -39,20 +39,39 @@ const normalizePaymentMethod = (value) => {
   return method;
 };
 
+const normalizeServiceType = (value) => {
+  const serviceType = String(value || "").trim().toLowerCase();
+  if (!serviceType) {
+    throw { status: 400, message: "service_type is required." };
+  }
+  return serviceType;
+};
+
 const isMissingTableError = (err, tableName) => {
   const msg = String(err?.message || "").toLowerCase();
   return msg.includes(`relation \"${String(tableName || "").toLowerCase()}\" does not exist`);
 };
 
-const fetchRankedCandidateDrivers = async (client, pickupLat, pickupLng, limit = 7) => {
+const fetchRankedCandidateDrivers = async (client, pickupLat, pickupLng, serviceType, limit = 7) => {
   const onlineDriverIds = getOnlineDriverIds();
+  const normalizedType = String(serviceType || "").trim().toLowerCase();
 
+  // Defensive validation: reject empty service types
+  if (!normalizedType) {
+    console.warn(`[CandidateQuery] Empty service type requested - no candidates available`);
+    return [];
+  }
+
+  // INNER JOIN requires vehicle to exist and be active
+  // LOWER() + TRIM() ensures exact matching (exact service type, no empty values)
+  // LENGTH check prevents matching empty strings in database
   const ranked = await client.query(
     `SELECT
        d.user_id AS driver_id,
+       LOWER(v.type) AS vehicle_type,
        COALESCE(d.rating_avg, 0) AS rating_avg,
        CASE
-         WHEN d.user_id = ANY($3::int[]) THEN 0
+         WHEN d.user_id = ANY($4::int[]) THEN 0
          ELSE 1
        END AS online_rank,
        (
@@ -69,8 +88,13 @@ const fetchRankedCandidateDrivers = async (client, pickupLat, pickupLng, limit =
          )
        ) AS distance_km
      FROM drivers d
+     INNER JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id AND v.vehicle_id IS NOT NULL
      WHERE d.active_status = TRUE
        AND COALESCE(d.is_approved, TRUE) = TRUE
+       AND COALESCE(v.active, TRUE) = TRUE
+       AND v.type IS NOT NULL
+       AND LENGTH(TRIM(v.type)) > 0
+       AND LOWER(TRIM(v.type)) = $3
        AND d.current_latitude IS NOT NULL
        AND d.current_longitude IS NOT NULL
        AND NOT EXISTS (
@@ -80,9 +104,20 @@ const fetchRankedCandidateDrivers = async (client, pickupLat, pickupLng, limit =
            AND LOWER(r.status) NOT IN ('completed', 'cancelled')
        )
      ORDER BY online_rank ASC, distance_km ASC, COALESCE(d.rating_avg, 0) DESC
-     LIMIT $4`,
-    [pickupLat, pickupLng, onlineDriverIds, limit]
+     LIMIT $5`,
+    [pickupLat, pickupLng, normalizedType, onlineDriverIds, limit]
   );
+
+  // Debug: Log query results to verify correct service type matching
+  console.log(
+    `[CandidateQuery] Searching for service_type: '${normalizedType}' -> Found ${ranked.rows.length} drivers`
+  );
+  if (ranked.rows.length > 0) {
+    const driverInfo = ranked.rows.map(r => `Driver#${r.driver_id}(Vehicle:${r.vehicle_type})`).join(", ");
+    console.log(`  ${driverInfo}`);
+  } else {
+    console.warn(`  ⚠️  NO DRIVERS FOUND for service type '${normalizedType}' - check vehicle types in database`);
+  }
 
   return ranked.rows.map((r) => ({
     driver_id: Number(r.driver_id),
@@ -132,11 +167,21 @@ const createRideRequest = async (payload) => {
   const distance = asNumber(distance_km, "distance_km");
   const initialFare = asNumber(initial_fare, "initial_fare");
   const paymentMethod = normalizePaymentMethod(payment_method);
+  const normalizedServiceType = normalizeServiceType(service_type);
 
-  if (!pickup_name || !dropoff_name || !service_type) {
+  if (!pickup_name || !dropoff_name) {
     throw {
       status: 400,
       message: "pickup_name, dropoff_name and service_type are required.",
+    };
+  }
+
+  // Validate that drivers exist with this vehicle type
+  const allowedTypes = ["bike", "cng", "car", "micro"];
+  if (!allowedTypes.includes(normalizedServiceType)) {
+    throw {
+      status: 400,
+      message: `Invalid service_type: '${normalizedServiceType}'. Allowed types: ${allowedTypes.join(", ")}`,
     };
   }
 
@@ -202,7 +247,7 @@ const createRideRequest = async (payload) => {
         customerId,
         pickupLocation.rows[0].location_id,
         dropoffLocation.rows[0].location_id,
-        service_type,
+        normalizedServiceType,
         "Requested",
         distance,
         initialFare,
@@ -226,13 +271,13 @@ const createRideRequest = async (payload) => {
       client,
       customerId,
       "Ride requested",
-      `Your ${service_type} ride request from ${pickup_name} to ${dropoff_name} has been created.`,
+      `Your ${normalizedServiceType} ride request from ${pickup_name} to ${dropoff_name} has been created.`,
       "Ride Alert"
     );
 
     let rankedCandidates = [];
     try {
-      rankedCandidates = await fetchRankedCandidateDrivers(client, pickupLat, pickupLng, 7);
+      rankedCandidates = await fetchRankedCandidateDrivers(client, pickupLat, pickupLng, normalizedServiceType, 7);
 
       if (rankedCandidates.length) {
         for (let i = 0; i < rankedCandidates.length; i += 1) {
@@ -264,7 +309,6 @@ const createRideRequest = async (payload) => {
       if (!isMissingTableError(candidateErr, "ride_driver_requests")) {
         throw candidateErr;
       }
-      rankedCandidates = [];
     }
 
     await client.query("COMMIT");
@@ -276,15 +320,23 @@ const createRideRequest = async (payload) => {
       dropoff_address: dropoff_name,
       distance,
       fare: initialFare,
-      service_type,
+      service_type: normalizedServiceType,
       request_time: ride.request_time,
     };
 
     const shortlistedDriverIds = rankedCandidates.map((c) => c.driver_id);
 
+    if (shortlistedDriverIds.length > 0) {
+      console.log(
+        `[Ride Request] Ride ${ride.ride_id} (${normalizedServiceType}) sent to ${shortlistedDriverIds.length} drivers: [${shortlistedDriverIds.join(", ")}]`
+      );
+    } else {
+      console.warn(`[Ride Request] Ride ${ride.ride_id} (${normalizedServiceType}) - NO MATCHING DRIVERS FOUND!`);
+    }
+
     const nearbyDriversCount = shortlistedDriverIds.length
       ? emitToDrivers(shortlistedDriverIds, "new_ride_request", rideBroadcastPayload)
-      : emitToOnlineDrivers("new_ride_request", rideBroadcastPayload);
+      : 0;
 
     return {
       ride,
@@ -312,11 +364,12 @@ const acceptRideByDriver = async ({ ride_id, driver_id }) => {
 
     // Lock driver row to prevent concurrent accepts by the same driver.
     const driverCheck = await client.query(
-      `SELECT user_id
-       FROM drivers
-       WHERE user_id = $1
-         AND COALESCE(is_approved, TRUE) = TRUE
-       FOR UPDATE`,
+      `SELECT d.user_id, COALESCE(v.type, '') AS vehicle_type
+       FROM drivers d
+       LEFT JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id
+       WHERE d.user_id = $1
+         AND COALESCE(d.is_approved, TRUE) = TRUE
+       FOR UPDATE OF d`,
       [driverId]
     );
 
@@ -327,7 +380,7 @@ const acceptRideByDriver = async ({ ride_id, driver_id }) => {
     await assertDriverHasNoActiveRide(client, driverId);
 
     const rideLock = await client.query(
-      `SELECT ride_id, customer_id, driver_id, status
+      `SELECT ride_id, customer_id, driver_id, status, service_type
        FROM rides
        WHERE ride_id = $1
        FOR UPDATE`,
@@ -339,6 +392,20 @@ const acceptRideByDriver = async ({ ride_id, driver_id }) => {
     }
 
     const lockedRide = rideLock.rows[0];
+    const driverVehicleType = String(driverCheck.rows[0]?.vehicle_type || "").trim().toLowerCase();
+    const rideServiceType = String(lockedRide.service_type || "").trim().toLowerCase();
+
+    // Vehicle type validation with detailed logging for debugging
+    if (driverVehicleType !== rideServiceType) {
+      console.warn(
+        `[Vehicle Mismatch] Driver ${driverId} vehicle '${driverVehicleType}' does not match ride ${rideId} requirement '${rideServiceType}'`
+      );
+      throw {
+        status: 409,
+        message: `Vehicle type mismatch. This ride requires ${lockedRide.service_type}. Your vehicle is ${driverCheck.rows[0]?.vehicle_type || 'not assigned'}.`,
+      };
+    }
+
     if (lockedRide.driver_id !== null || String(lockedRide.status || "").toLowerCase() !== "requested") {
       throw {
         status: 409,

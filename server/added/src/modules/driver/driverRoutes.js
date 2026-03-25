@@ -65,4 +65,12 @@ router.patch(
 	driverController.updateLocation
 );
 
+router.post(
+	"/:userId/vehicle/switch",
+	protect,
+	authorize("driver"),
+	authorizeSelfOrRoles("driver"),
+	driverController.switchActiveVehicle
+);
+
 module.exports = router;
