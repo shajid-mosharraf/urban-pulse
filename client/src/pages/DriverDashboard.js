@@ -16,9 +16,17 @@ const DriverDashboard = () => {
   const [isOnline, setIsOnline] = useState(false);
   const [incomingRide, setIncomingRide] = useState(null);
   const [activeRide, setActiveRide] = useState(null);
+  const [rideFlowStatus, setRideFlowStatus] = useState(null);
   // (Put these right under your other state variables)
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  const [pickupOtpInput, setPickupOtpInput] = useState("");
+  const [completionOtpCode, setCompletionOtpCode] = useState(null);
+  const [ratingScore, setRatingScore] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingMessage, setRatingMessage] = useState("");
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
   const watchIdRef = useRef(null);
 
@@ -40,10 +48,45 @@ const DriverDashboard = () => {
       setMessages((prev) => [...prev, messageData]);
     });
 
+    socket.on("ride_picked_up", (payload) => {
+      if (activeRide && Number(payload?.ride_id) === Number(activeRide.ride_id)) {
+        setRideFlowStatus("in_progress");
+      }
+    });
+
+    socket.on("ride_driver_completed", (payload) => {
+      if (activeRide && Number(payload?.ride_id) === Number(activeRide.ride_id)) {
+        setRideFlowStatus("waiting_customer_confirmation");
+        if (payload?.completion_otp) {
+          setCompletionOtpCode(payload.completion_otp);
+        }
+      }
+    });
+
+    socket.on("ride_completed", (payload) => {
+      if (activeRide && Number(payload?.ride_id) === Number(activeRide.ride_id)) {
+        setRideFlowStatus("completed");
+      }
+    });
+
+    socket.on("ride_cancelled", (payload) => {
+      if (activeRide && Number(payload?.ride_id) === Number(activeRide.ride_id)) {
+        setActiveRide(null);
+        setRideFlowStatus(null);
+        setPickupOtpInput("");
+        setCompletionOtpCode(null);
+        setMessages([]);
+      }
+    });
+
     // Cleanup listener on unmount
     return () => {
       socket.off("new_ride_request");
       socket.off("receive_message");
+      socket.off("ride_picked_up");
+      socket.off("ride_driver_completed");
+      socket.off("ride_completed");
+      socket.off("ride_cancelled");
     };
   }, [driverId, activeRide]);
 
@@ -117,7 +160,15 @@ const DriverDashboard = () => {
         const payload = data.data || {};
         // We got it! Move from "incoming" to "active"
         setActiveRide(incomingRide);
+        setRideFlowStatus("accepted");
         setIncomingRide(null);
+        setPickupOtpInput("");
+        setCompletionOtpCode(null);
+        setRatingScore(5);
+        setRatingComment("");
+        setRatingMessage("");
+        setRatingSubmitting(false);
+        setRatingSubmitted(false);
         socket.emit("join_ride_room", incomingRide.ride_id);
         
         // SAFE FALLBACK: If driverDetails is missing, use an empty object so it doesn't crash!
@@ -145,6 +196,115 @@ const DriverDashboard = () => {
   const declineRide = () => {
     setIncomingRide(null);
     // In a real app, you might emit an event so the server pings the NEXT closest driver
+  };
+
+  const startRide = async () => {
+    if (!activeRide) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/driver/${driverId}/rides/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          ride_id: activeRide.ride_id,
+          pickup_otp: pickupOtpInput,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || "Unable to start ride.");
+      }
+
+      setRideFlowStatus("in_progress");
+    } catch (error) {
+      alert(error.message || "Unable to start ride.");
+    }
+  };
+
+  const markRideForCompletion = async () => {
+    if (!activeRide) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`http://localhost:5000/api/driver/${driverId}/rides/end`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          ride_id: activeRide.ride_id,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || "Unable to mark ride completion.");
+      }
+
+      setRideFlowStatus("waiting_customer_confirmation");
+      setCompletionOtpCode(data?.data?.completion_otp || null);
+    } catch (error) {
+      alert(error.message || "Unable to mark ride completion.");
+    }
+  };
+
+  const submitCustomerRating = async () => {
+    if (!activeRide?.ride_id) {
+      return;
+    }
+
+    try {
+      setRatingSubmitting(true);
+      setRatingMessage("");
+
+      const response = await fetch(`http://localhost:5000/api/rides/${activeRide.ride_id}/rate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          score: Number(ratingScore),
+          comment: ratingComment.trim() || null,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || "Unable to submit rating.");
+      }
+
+      setRatingSubmitted(true);
+      setRatingMessage("Thanks. Your rating has been submitted.");
+    } catch (error) {
+      setRatingMessage(error.message || "Unable to submit rating.");
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
+
+  const resetActiveRide = () => {
+    setActiveRide(null);
+    setRideFlowStatus(null);
+    setMessages([]);
+    setPickupOtpInput("");
+    setCompletionOtpCode(null);
+    setRatingScore(5);
+    setRatingComment("");
+    setRatingMessage("");
+    setRatingSubmitting(false);
+    setRatingSubmitted(false);
   };
 
   if (!driverId) {
@@ -198,6 +358,38 @@ const DriverDashboard = () => {
           <h3>🚗 Ride in Progress</h3>
           <p><strong>Pickup Customer At:</strong> {activeRide.pickup_address}</p>
           <p><strong>Destination:</strong> {activeRide.dropoff_address}</p>
+          <p><strong>Status:</strong> {
+            rideFlowStatus === "accepted"
+              ? "Accepted - waiting to start"
+              : rideFlowStatus === "in_progress"
+              ? "In progress"
+              : rideFlowStatus === "waiting_customer_confirmation"
+              ? "Waiting for customer OTP confirmation"
+              : rideFlowStatus === "completed"
+              ? "Completed"
+              : "Pending"
+          }</p>
+
+          {rideFlowStatus === "accepted" && (
+            <div style={{ marginTop: "12px", marginBottom: "12px" }}>
+              <p style={{ marginBottom: "8px" }}><strong>Enter pickup OTP to start ride:</strong></p>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  value={pickupOtpInput}
+                  onChange={(e) => setPickupOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="6-digit pickup OTP"
+                  inputMode="numeric"
+                  maxLength={6}
+                  style={{ flex: 1 }}
+                />
+                <button onClick={startRide} style={{ width: "auto" }}>Start Ride</button>
+              </div>
+            </div>
+          )}
+
+          {completionOtpCode && (
+            <p><strong>Completion OTP:</strong> {completionOtpCode}</p>
+          )}
           
           {/* DRIVER CHAT UI */}
           <div style={{ marginTop: "15px" }}>
@@ -233,16 +425,50 @@ const DriverDashboard = () => {
             </div>
           </div>
 
-          <button 
-            className="btn-complete" 
-            onClick={() => {
-              setActiveRide(null);
-              setMessages([]); // Clear chat on complete
-              alert("Ride Completed! Added to earnings.");
-            }}
-          >
-            Complete Ride
-          </button>
+          {rideFlowStatus === "in_progress" && (
+            <button className="btn-complete" onClick={markRideForCompletion}>
+              Complete Ride
+            </button>
+          )}
+
+          {rideFlowStatus === "completed" && (
+            <div style={{ marginTop: "14px", paddingTop: "10px", borderTop: "1px solid #e2e8f0" }}>
+              <h4 style={{ marginTop: 0 }}>Rate Customer</h4>
+              <div style={{ display: "grid", gap: "8px" }}>
+                <label><strong>Score (out of 5)</strong></label>
+                <select
+                  value={ratingScore}
+                  onChange={(e) => setRatingScore(Number(e.target.value))}
+                  disabled={ratingSubmitted || ratingSubmitting}
+                >
+                  {[5, 4, 3, 2, 1].map((score) => (
+                    <option key={score} value={score}>{score}</option>
+                  ))}
+                </select>
+                <label><strong>Comment (optional)</strong></label>
+                <textarea
+                  value={ratingComment}
+                  onChange={(e) => setRatingComment(e.target.value)}
+                  rows={3}
+                  placeholder="Share your feedback"
+                  disabled={ratingSubmitted || ratingSubmitting}
+                />
+                {!ratingSubmitted && (
+                  <button onClick={submitCustomerRating} disabled={ratingSubmitting}>
+                    {ratingSubmitting ? "Submitting..." : "Submit Rating"}
+                  </button>
+                )}
+                {ratingMessage && (
+                  <p style={{ margin: 0, color: ratingSubmitted ? "#198754" : "#dc3545" }}>
+                    {ratingMessage}
+                  </p>
+                )}
+                <button onClick={resetActiveRide} style={{ backgroundColor: "#0d6efd", color: "white" }}>
+                  Back to Waiting
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

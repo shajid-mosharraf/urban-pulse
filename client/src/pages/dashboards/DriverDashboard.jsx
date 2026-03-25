@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import io from "socket.io-client";
 import { MapContainer, Marker, Polyline, Popup, TileLayer } from "react-leaflet";
@@ -52,14 +52,16 @@ function DriverDashboard() {
     { id: "ratings", icon: "⭐", label: "My Rating" },
   ];
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async ({ silent = false } = {}) => {
     if (!user?.user_id) {
       navigate("/login", { replace: true });
       return;
     }
 
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       const response = await fetch(`${API_BASE}/api/driver/dashboard/${user.user_id}`, {
         headers: {
           "Content-Type": "application/json",
@@ -79,13 +81,25 @@ function DriverDashboard() {
     } catch (err) {
       setError(err.message || "Unable to load dashboard.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  };
+  }, [navigate, token, user?.user_id]);
 
   useEffect(() => {
     loadDashboard();
-  }, [navigate, token, user?.user_id]);
+  }, [loadDashboard]);
+
+  useEffect(() => {
+    if (!user?.user_id) return;
+
+    const refreshId = setInterval(() => {
+      loadDashboard({ silent: true });
+    }, 15000);
+
+    return () => clearInterval(refreshId);
+  }, [loadDashboard, user?.user_id]);
 
   useEffect(() => {
     const activeRideId = dashboard?.activeRide?.ride_id;
@@ -129,6 +143,11 @@ function DriverDashboard() {
       setMessages((prev) => [...prev, payload]);
     };
 
+    const onNewRideRequest = () => {
+      loadDashboard({ silent: true });
+    };
+
+    socket.on("new_ride_request", onNewRideRequest);
     socket.on("ride_cancelled", onRideCancelled);
     socket.on("ride_picked_up", onRidePickedUp);
     socket.on("ride_driver_completed", onRideDriverCompleted);
@@ -136,13 +155,14 @@ function DriverDashboard() {
     socket.on("receive_message", onReceiveMessage);
 
     return () => {
+      socket.off("new_ride_request", onNewRideRequest);
       socket.off("ride_cancelled", onRideCancelled);
       socket.off("ride_picked_up", onRidePickedUp);
       socket.off("ride_driver_completed", onRideDriverCompleted);
       socket.off("ride_completed", onRideCompleted);
       socket.off("receive_message", onReceiveMessage);
     };
-  }, [dashboard?.activeRide?.ride_id]);
+  }, [dashboard?.activeRide?.ride_id, loadDashboard]);
 
   const updateStatus = async (nextStatus) => {
     if (!user?.user_id) return;

@@ -81,13 +81,45 @@ function MultiRoleSignUp() {
     }
 
     try {
-      // Prepare Payload
-      // Note: If you want to upload actual files (images/PDFs), 
-      // you will eventually need to use 'new FormData()' object.
-      // For now, we are sending JSON text data.
-      const payload = { ...formData, role: role };
+      const payload = new FormData();
 
-      const response = await axios.post("http://localhost:5000/api/register", payload);
+      payload.append("firstName", formData.firstName || "");
+      payload.append("lastName", formData.lastName || "");
+      payload.append("phone", formData.phone || "");
+      payload.append("email", formData.email || "");
+      payload.append("password", formData.password || "");
+      payload.append("nid", formData.nid || "");
+      payload.append("wallet", formData.wallet || "0");
+      payload.append("role", role || "");
+
+      if (formData.profilePic) {
+        payload.append("profilePic", formData.profilePic);
+      }
+
+      if (role === "driver") {
+        payload.append("licenseId", formData.licenseId || "");
+        payload.append("licenseExpire", formData.licenseExpire || "");
+        payload.append("vehiclePlate", formData.vehiclePlate || "");
+        payload.append("vehicleModel", formData.vehicleModel || "");
+        payload.append("vehicleType", formData.vehicleType || "");
+        payload.append("vehicleColor", formData.vehicleColor || "");
+
+        if (formData.licenseDocs) {
+          payload.append("licenseDocs", formData.licenseDocs);
+        }
+      }
+
+      if (role === "restaurant") {
+        payload.append("restaurantName", formData.restaurantName || "");
+        payload.append("managerName", formData.managerName || "");
+        payload.append("location", formData.location || "");
+      }
+
+      const response = await axios.post("http://localhost:5000/api/register", payload, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
 
       console.log("Success:", response.data);
       alert(`Account created successfully! Please login.`);

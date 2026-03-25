@@ -8,7 +8,7 @@ const RoleDashboardRedirect = () => {
     const userRaw = localStorage.getItem("user");
 
     if (!userRaw) {
-      navigate("/login", { replace: true });
+      navigate("/", { replace: true });
       return;
     }
 
@@ -18,7 +18,7 @@ const RoleDashboardRedirect = () => {
     } catch (err) {
       localStorage.removeItem("user");
       localStorage.removeItem("accessToken");
-      navigate("/login", { replace: true });
+      navigate("/", { replace: true });
       return;
     }
 
@@ -44,7 +44,7 @@ const RoleDashboardRedirect = () => {
       return;
     }
 
-    navigate("/login", { replace: true });
+    navigate("/", { replace: true });
   }, [navigate]);
 
   return <div style={{ padding: "24px" }}>Redirecting to your dashboard...</div>;

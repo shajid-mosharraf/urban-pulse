@@ -42,6 +42,19 @@ const destIcon = new L.divIcon({
 });
 const socket = io("http://localhost:5000");
 
+const normalizeRideStatus = (status) => {
+  const value = String(status || "").toLowerCase();
+
+  if (value === "requested") return "waiting_driver";
+  if (value === "accepted") return "driver_assigned";
+  if (value === "in_progress") return "picked_up";
+  if (value === "driver_completed") return "waiting_completion_otp";
+  if (value === "completed") return "completed";
+  if (value === "cancelled") return "cancelled";
+
+  return null;
+};
+
 const RidePage = () => {
   const navigate = useNavigate();
   // Free GraphHopper Key
@@ -82,6 +95,12 @@ const RidePage = () => {
   const [completionOtpCode, setCompletionOtpCode] = useState(null);
   const [completionOtpInput, setCompletionOtpInput] = useState("");
   const [completionMessage, setCompletionMessage] = useState("");
+  const [ratingScore, setRatingScore] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingMessage, setRatingMessage] = useState("");
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [isHydratingRide, setIsHydratingRide] = useState(true);
 
   // Refs for Debouncing
   const pickupTimer = useRef(null);
@@ -122,13 +141,112 @@ const RidePage = () => {
       setCompletionMessage("Ride completed successfully.");
       setRideStatus("completed");
       setCompletionOtpInput("");
-      setTimeout(() => {
-        navigate("/dashboard/customer");
-      }, 1000);
+      setRatingMessage("");
     } catch (err) {
       setCompletionMessage(err.message || "Unable to confirm completion OTP.");
     }
   };
+
+  const submitRideRating = async () => {
+    if (!currentRide?.ride_id) {
+      return;
+    }
+
+    try {
+      setRatingSubmitting(true);
+      setRatingMessage("");
+
+      const response = await fetch(`http://localhost:5000/api/rides/${currentRide.ride_id}/rate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          score: Number(ratingScore),
+          comment: ratingComment.trim() || null,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || "Unable to submit ride rating.");
+      }
+
+      setRatingSubmitted(true);
+      setRatingMessage("Thanks. Your rating has been submitted.");
+    } catch (err) {
+      setRatingMessage(err.message || "Unable to submit ride rating.");
+    } finally {
+      setRatingSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    const restoreActiveRide = async () => {
+      if (!actualUserId) {
+        setIsHydratingRide(false);
+        return;
+      }
+
+      try {
+        const response = await fetch(`http://localhost:5000/api/customer/dashboard/${actualUserId}`, {
+          headers: {
+            Authorization: accessToken ? `Bearer ${accessToken}` : "",
+          },
+          credentials: "include",
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data?.success) {
+          return;
+        }
+
+        const dashboard = data.data || {};
+        const activeRide = dashboard.activeRide;
+        const mappedStatus = normalizeRideStatus(activeRide?.status);
+
+        if (!activeRide?.ride_id || !mappedStatus || ["completed", "cancelled"].includes(mappedStatus)) {
+          return;
+        }
+
+        setCurrentRide({
+          ride_id: activeRide.ride_id,
+          pickup: activeRide.pickup || "",
+          destination: activeRide.dropoff || "",
+          vehicle: activeRide.service_type || "",
+          price: activeRide.fare || 0,
+          payment: activeRide.payment_method || "cash",
+        });
+        setRideStatus(mappedStatus);
+        setRequestTime(activeRide.request_time ? new Date(activeRide.request_time).toLocaleTimeString() : null);
+        setPickupOtpCode(activeRide.pickup_otp || null);
+        setCompletionOtpCode(activeRide.completion_otp || activeRide.ride_otp || null);
+
+        const hasDriver = Boolean(activeRide.driver_name || activeRide.vehicle_plate || activeRide.vehicle_model);
+        if (hasDriver) {
+          setAssignedDriver({
+            name: activeRide.driver_name || "Driver",
+            phone: "",
+            vehicle: activeRide.vehicle_plate || activeRide.vehicle_model || "Assigned vehicle",
+            rating: activeRide.driver_rating_avg || "5.0",
+          });
+        }
+
+        socket.emit("join_ride_room", activeRide.ride_id);
+        if (mappedStatus === "waiting_driver") {
+          socket.emit("customer_waiting", activeRide.ride_id);
+        }
+      } catch (error) {
+        console.error("Failed to restore active ride:", error);
+      } finally {
+        setIsHydratingRide(false);
+      }
+    };
+
+    restoreActiveRide();
+  }, [actualUserId, accessToken]);
   
   const geoProvider = new OpenStreetMapProvider({
     params: {
@@ -218,6 +336,10 @@ const RidePage = () => {
   };
 
   const confirmRide = async () => {
+    if (currentRide?.ride_id) {
+      return;
+    }
+
     if (!selectedVehicle || !paymentMethod) return alert("Select vehicle and payment!");
     
     if (!actualUserId) {
@@ -292,25 +414,35 @@ const RidePage = () => {
       }
     });
 
-    socket.on("ride_picked_up", () => {
+    socket.on("ride_picked_up", (payload) => {
+      if (!currentRide?.ride_id || Number(payload?.ride_id) !== Number(currentRide.ride_id)) {
+        return;
+      }
       setRideStatus("picked_up");
     });
 
     socket.on("ride_driver_completed", (payload) => {
+      if (!currentRide?.ride_id || Number(payload?.ride_id) !== Number(currentRide.ride_id)) {
+        return;
+      }
       setRideStatus("waiting_completion_otp");
       if (payload?.completion_otp) {
         setCompletionOtpCode(payload.completion_otp);
       }
     });
 
-    socket.on("ride_completed", () => {
+    socket.on("ride_completed", (payload) => {
+      if (!currentRide?.ride_id || Number(payload?.ride_id) !== Number(currentRide.ride_id)) {
+        return;
+      }
       setRideStatus("completed");
-      setTimeout(() => {
-        navigate("/dashboard/customer");
-      }, 1200);
+      setRatingMessage("");
     });
 
-    socket.on("ride_cancelled", () => {
+    socket.on("ride_cancelled", (payload) => {
+      if (!currentRide?.ride_id || Number(payload?.ride_id) !== Number(currentRide.ride_id)) {
+        return;
+      }
       setRideStatus("cancelled");
       setTimeout(() => {
         cancelRideLocal();
@@ -332,7 +464,7 @@ const RidePage = () => {
       socket.off("ride_cancelled");
       socket.off("receive_message");
     };
-  }, [navigate]);
+  }, [currentRide?.ride_id, navigate]);
 
   const cancelRideLocal = () => {
     setCurrentRide(null);
@@ -351,6 +483,11 @@ const RidePage = () => {
     setCompletionOtpCode(null);
     setCompletionOtpInput("");
     setCompletionMessage("");
+    setRatingScore(5);
+    setRatingComment("");
+    setRatingMessage("");
+    setRatingSubmitting(false);
+    setRatingSubmitted(false);
   };
 
   const cancelRide = async () => {
@@ -397,9 +534,35 @@ const RidePage = () => {
 
   return (
     <div className="ride-container">
+      {isHydratingRide && (
+        <div className="section" style={{ textAlign: "center" }}>
+          <p><strong>Loading your active ride...</strong></p>
+        </div>
+      )}
+
       {/* ================= SECTION 1: SEARCH & RIDE INFO ================= */}
       <div className="section">
-        {!currentRide ? (
+        {currentRide ? (
+          <>
+            <h2>Ride Info</h2>
+            <p><strong>Status:</strong> {
+              rideStatus === "waiting_driver" ? "Waiting for driver..." :
+              rideStatus === "driver_assigned" ? "Driver Assigned" :
+              rideStatus === "picked_up" ? "Picked Up" :
+              rideStatus === "waiting_completion_otp" ? "Waiting completion confirmation" :
+              rideStatus === "completed" ? "Completed" :
+              rideStatus === "cancelled" ? "Cancelled" : "Pending"
+            }</p>
+            <p><strong>Time:</strong> {requestTime}</p>
+            <p><strong>From:</strong> {currentRide.pickup}</p>
+            <p><strong>To:</strong> {currentRide.destination}</p>
+            <p><strong>Distance:</strong> {distance} km</p>
+            <p><strong>Price:</strong> ৳ {currentRide.price}</p>
+            <p><strong>Payment:</strong> {currentRide.payment}</p>
+            {pickupOtpCode && <p><strong>Pickup OTP:</strong> {pickupOtpCode}</p>}
+            {completionOtpCode && <p><strong>Completion OTP:</strong> {completionOtpCode}</p>}
+          </>
+        ) : !isHydratingRide ? (
           <>
             <h2>Book Ride</h2>
             
@@ -449,25 +612,7 @@ const RidePage = () => {
             )}
           </>
         ) : (
-          <>
-            <h2>Ride Info</h2>
-            <p><strong>Status:</strong> {
-              rideStatus === "waiting_driver" ? "Waiting for driver..." :
-              rideStatus === "driver_assigned" ? "Driver Assigned" :
-              rideStatus === "picked_up" ? "Picked Up" :
-              rideStatus === "waiting_completion_otp" ? "Waiting completion confirmation" :
-              rideStatus === "completed" ? "Completed" :
-              rideStatus === "cancelled" ? "Cancelled" : "Pending"
-            }</p>
-            <p><strong>Time:</strong> {requestTime}</p>
-            <p><strong>From:</strong> {currentRide.pickup}</p>
-            <p><strong>To:</strong> {currentRide.destination}</p>
-            <p><strong>Distance:</strong> {distance} km</p>
-            <p><strong>Price:</strong> ৳ {currentRide.price}</p>
-            <p><strong>Payment:</strong> {currentRide.payment}</p>
-            {pickupOtpCode && <p><strong>Pickup OTP:</strong> {pickupOtpCode}</p>}
-            {completionOtpCode && <p><strong>Completion OTP:</strong> {completionOtpCode}</p>}
-          </>
+          null
         )}
       </div>
 
@@ -516,7 +661,7 @@ const RidePage = () => {
       <div className="section">
         
         {/* State 1: Before confirming ride (Show Vehicles) */}
-        {!currentRide && prices && (
+        {!isHydratingRide && !currentRide && prices && (
           <>
             <h2>Select Vehicle</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
@@ -593,7 +738,7 @@ const RidePage = () => {
 
       {/* ================= SECTION 4: PAYMENT & CHAT ================= */}
       <div className="section">
-        {!currentRide ? (
+        {!isHydratingRide && !currentRide ? (
           <>
             <h2>Payment</h2>
             <div style={{ display: "flex", gap: "10px" }}>
@@ -645,6 +790,51 @@ const RidePage = () => {
                 style={{ flex: 1 }}
               />
               <button onClick={sendMessage}>Send</button>
+            </div>
+          </>
+        ) : rideStatus === "completed" ? (
+          <>
+            <h2>Rate Your Driver</h2>
+            <div style={{ display: "grid", gap: "10px" }}>
+              <label>
+                <strong>Score (out of 5)</strong>
+              </label>
+              <select
+                value={ratingScore}
+                onChange={(e) => setRatingScore(Number(e.target.value))}
+                disabled={ratingSubmitted || ratingSubmitting}
+              >
+                {[5, 4, 3, 2, 1].map((score) => (
+                  <option key={score} value={score}>{score}</option>
+                ))}
+              </select>
+
+              <label>
+                <strong>Comment (optional)</strong>
+              </label>
+              <textarea
+                value={ratingComment}
+                onChange={(e) => setRatingComment(e.target.value)}
+                rows={3}
+                placeholder="Share your experience"
+                disabled={ratingSubmitted || ratingSubmitting}
+              />
+
+              {!ratingSubmitted && (
+                <button onClick={submitRideRating} disabled={ratingSubmitting}>
+                  {ratingSubmitting ? "Submitting..." : "Submit Rating"}
+                </button>
+              )}
+
+              {ratingMessage && (
+                <p style={{ margin: 0, color: ratingSubmitted ? "#198754" : "#dc3545" }}>
+                  {ratingMessage}
+                </p>
+              )}
+
+              <button onClick={() => navigate("/dashboard/customer")} style={{ backgroundColor: "#0d6efd", color: "white" }}>
+                Back to Dashboard
+              </button>
             </div>
           </>
         ) : null}
