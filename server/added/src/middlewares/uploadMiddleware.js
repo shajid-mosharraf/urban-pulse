@@ -1,8 +1,8 @@
 const multer = require("multer");
-const path = require("path");
+const path = require("path");//fto eget extensiom of file
 const supabase = require("../config/supabase");
 
-// ─── Allowed MIME types ───────────────────────────────────────────────────────
+// ─── Allowed MIME types = Multipurpose Internet Mail Extensions.───────────────────────────────────────────────────────
 const ALLOWED_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -16,7 +16,8 @@ const ALLOWED_MIME_TYPES = [
 const MAX_FILE_SIZE_MB = 10;
 
 // ─── Multer config (memory storage — we stream directly to Supabase) ──────────
-const storage = multer.memoryStorage();
+const storage = multer.memoryStorage();//but amar kache server end e disk e rakha beter mone hoi
+//nahole extreme pressure e memory fail korte pare
 
 const fileFilter = (req, file, cb) => {
   if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
@@ -56,7 +57,7 @@ const uploadToSupabase = async ({ buffer, mimetype, originalName, bucket, folder
 
   const { error } = await supabase.storage.from(bucket).upload(filePath, buffer, {
     contentType: mimetype,
-    upsert: false,
+    upsert: false,//to prevent overwriting of existing ones
   });
 
   if (error) throw new Error(`Supabase upload failed: ${error.message}`);
@@ -90,6 +91,9 @@ const uploadSingle = upload.single("file");
 /** Single profile picture — field name: "profile_picture" */
 const uploadProfilePicture = upload.single("profile_picture");
 
+/** Single driver license document — field name: "license_document" */
+const uploadLicenseDocument = upload.single("license_document");
+
 /** Multiple files — field name: "files", max 5 */
 const uploadMultiple = upload.array("files", 5);
 
@@ -110,8 +114,27 @@ const handleUploadError = (err, req, res, next) => {
 module.exports = {
   uploadSingle,
   uploadProfilePicture,
+  uploadLicenseDocument,
   uploadMultiple,
   uploadFields,
   uploadToSupabase,
   handleUploadError,
 };
+/*Frontend form submits file
+        ↓
+Route uses uploadProfilePicture
+        ↓
+Multer runs
+   → fileFilter checks type
+   → size limit checked
+   → file stored in memory
+        ↓
+req.file available
+        ↓
+You call uploadToSupabase()
+        ↓
+File uploaded to Supabase
+        ↓
+Public URL generated
+        ↓
+You send/save URL/*/

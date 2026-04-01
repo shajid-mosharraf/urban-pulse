@@ -2,6 +2,11 @@ const express = require("express");
 
 const accountController = require("./accountController");
 const {
+  uploadProfilePicture,
+  uploadLicenseDocument,
+  handleUploadError,
+} = require("../../middlewares/uploadMiddleware");
+const {
   protect,
   authorizeSelfOrRoles,
 } = require("../../middlewares/authMiddleware");
@@ -10,6 +15,23 @@ const router = express.Router();
 
 router.get("/:userId/profile", protect, authorizeSelfOrRoles("admin"), accountController.getProfile);
 router.put("/:userId/profile", protect, authorizeSelfOrRoles("admin"), accountController.updateProfile);
+router.put("/:userId/password", protect, authorizeSelfOrRoles("admin"), accountController.updatePassword);
+router.post(
+  "/:userId/profile-picture",
+  protect,
+  authorizeSelfOrRoles("admin"),
+  uploadProfilePicture,
+  handleUploadError,
+  accountController.updateProfilePicture
+);
+router.post(
+  "/:userId/license-document",
+  protect,
+  authorizeSelfOrRoles("admin"),
+  uploadLicenseDocument,
+  handleUploadError,
+  accountController.updateDriverLicenseDocument
+);
 
 router.get("/:userId/wallet", protect, authorizeSelfOrRoles("admin"), accountController.getWallet);
 router.post("/:userId/wallet/recharge", protect, authorizeSelfOrRoles("admin"), accountController.rechargeWallet);

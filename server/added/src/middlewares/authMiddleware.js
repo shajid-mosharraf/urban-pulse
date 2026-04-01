@@ -53,7 +53,7 @@ const authorize = (...roles) => {
   };
 };
 
-/**
+/**ownership based
  * Allows the request if the path userId belongs to the logged in user,
  * or if the logged in user has one of the override roles.
  */

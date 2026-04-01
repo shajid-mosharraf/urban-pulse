@@ -214,6 +214,7 @@ const getCustomerDashboardData = async (userId) => {
       [userId]
     );
   } catch (err) {
+    //eta baad db update korchi
     const msg = String(err?.message || "").toLowerCase();
     if (msg.includes("relation \"ride_completion_details\" does not exist")) {
       activeRideResult = await query(
@@ -308,6 +309,7 @@ const getCustomerDashboardData = async (userId) => {
       [userId]
     );
   } catch (err) {
+    //lagbe na delete kore dibooo ,, db update korchi
     if (String(err?.message || "").toLowerCase().includes("relation \"ride_party_ratings\" does not exist")) {
       recentRidesResult = await query(
         `SELECT

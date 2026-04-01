@@ -1,4 +1,8 @@
+const bcrypt = require("bcrypt");
 const { getClient, query } = require("../../config/db");
+const { uploadToSupabase } = require("../../middlewares/uploadMiddleware");
+
+const SALT_ROUNDS = 12;
 
 const toNumber = (value) => Number(value || 0);
 
@@ -93,12 +97,47 @@ const getUserProfile = async (userId) => {
        u.phone,
        u.profile_picture,
        u.created_at,
+       d.licence_id,
+       d.license_expire,
+       d.documents_url,
+       d.rating_avg,
+       d.active_status,
+       d.is_approved,
+       v.licence_no AS vehicle_plate,
+       v.model AS vehicle_model,
+       v.type AS vehicle_type,
+       v.color AS vehicle_color,
+       rs.name AS restaurant_name,
+       rs.phone AS restaurant_phone,
        ARRAY_AGG(LOWER(r.role_name)) FILTER (WHERE r.role_name IS NOT NULL) AS roles
      FROM users u
      LEFT JOIN user_role ur ON ur.user_id = u.user_id
      LEFT JOIN roles r ON r.role_id = ur.role_id
+     LEFT JOIN drivers d ON d.user_id = u.user_id
+     LEFT JOIN LATERAL (
+       SELECT licence_no, model, type, color
+       FROM vehicles
+       WHERE owner_id = u.user_id AND active = TRUE
+       ORDER BY vehicle_id DESC
+       LIMIT 1
+     ) v ON TRUE
+     LEFT JOIN owners o ON o.user_id = u.user_id
+     LEFT JOIN restaurants rs ON rs.owner_id = o.user_id
      WHERE u.user_id = $1
-     GROUP BY u.user_id`,
+     GROUP BY
+       u.user_id,
+       d.licence_id,
+       d.license_expire,
+       d.documents_url,
+       d.rating_avg,
+       d.active_status,
+       d.is_approved,
+       v.licence_no,
+       v.model,
+       v.type,
+       v.color,
+       rs.name,
+       rs.phone`,
     [userId]
   );
 
@@ -133,6 +172,18 @@ const getUserProfile = async (userId) => {
       profile_picture: user.profile_picture,
       created_at: user.created_at,
       roles: user.roles || [],
+      licence_id: user.licence_id,
+      license_expire: user.license_expire,
+      license_document: user.documents_url,
+      rating_avg: user.rating_avg,
+      active_status: user.active_status,
+      is_approved: user.is_approved,
+      vehicle_plate: user.vehicle_plate,
+      vehicle_model: user.vehicle_model,
+      vehicle_type: user.vehicle_type,
+      vehicle_color: user.vehicle_color,
+      restaurant_name: user.restaurant_name,
+      restaurant_phone: user.restaurant_phone,
     },
     savedAddresses: addressesResult.rows,
   };
@@ -158,6 +209,123 @@ const updateUserProfile = async (userId, payload) => {
   }
 
   return result.rows[0];
+};
+
+const updateUserPassword = async (userId, payload) => {
+  const { current_password, new_password, confirm_password } = payload;
+
+  if (!current_password || !new_password) {
+    throw { status: 400, message: "Current password and new password are required." };
+  }
+
+  if (new_password.length < 6) {
+    throw { status: 400, message: "New password must be at least 6 characters." };
+  }
+
+  if (confirm_password !== undefined && new_password !== confirm_password) {
+    throw { status: 400, message: "New password and confirm password do not match." };
+  }
+
+  const userResult = await query(
+    `SELECT user_id, password_hash
+     FROM users
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  if (!userResult.rows.length) {
+    throw { status: 404, message: "User profile not found." };
+  }
+
+  const user = userResult.rows[0];
+  const isCurrentValid = await bcrypt.compare(current_password, user.password_hash);
+  if (!isCurrentValid) {
+    throw { status: 401, message: "Current password is incorrect." };
+  }
+
+  const isSamePassword = await bcrypt.compare(new_password, user.password_hash);
+  if (isSamePassword) {
+    throw { status: 400, message: "New password must be different from current password." };
+  }
+
+  const newHash = await bcrypt.hash(new_password, SALT_ROUNDS);
+
+  await query(
+    `UPDATE users
+     SET password_hash = $2,
+         updated_at = NOW()
+     WHERE user_id = $1`,
+    [userId, newHash]
+  );
+
+  return { user_id: userId, updated: true };
+};
+
+const updateUserProfilePicture = async (userId, file) => {
+  if (!file) {
+    throw { status: 400, message: "Profile picture file is required." };
+  }
+
+  const publicUrl = await uploadToSupabase({
+    buffer: file.buffer,
+    mimetype: file.mimetype,
+    originalName: file.originalname,
+    bucket: "avatars",
+    folder: `users/${userId}`,
+  });
+
+  const result = await query(
+    `UPDATE users
+     SET profile_picture = $2,
+         updated_at = NOW()
+     WHERE user_id = $1
+     RETURNING user_id, profile_picture`,
+    [userId, publicUrl]
+  );
+
+  if (!result.rows.length) {
+    throw { status: 404, message: "User profile not found." };
+  }
+
+  return result.rows[0];
+};
+
+const updateDriverLicenseDocument = async (userId, file) => {
+  if (!file) {
+    throw { status: 400, message: "License document file is required." };
+  }
+
+  const driverResult = await query(
+    `SELECT user_id
+     FROM drivers
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  if (!driverResult.rows.length) {
+    throw { status: 403, message: "Only drivers can update license documents." };
+  }
+
+  const publicUrl = await uploadToSupabase({
+    buffer: file.buffer,
+    mimetype: file.mimetype,
+    originalName: file.originalname,
+    bucket: "documents",
+    folder: `drivers/${userId}`,
+  });
+
+  const result = await query(
+    `UPDATE drivers
+     SET documents_url = $2
+     WHERE user_id = $1
+     RETURNING user_id, documents_url`,
+    [userId, publicUrl]
+  );
+
+  return {
+    user_id: result.rows[0].user_id,
+    license_document: result.rows[0].documents_url,
+  };
 };
 
 const getWalletData = async (userId) => {
@@ -555,7 +723,7 @@ const getRatingsData = async (userId) => {
        COUNT(*) FILTER (WHERE score = 3) AS star_3,
        COUNT(*) FILTER (WHERE score = 2) AS star_2,
        COUNT(*) FILTER (WHERE score = 1) AS star_1
-     FROM ratings
+     FROM ride_party_ratings
      WHERE receiver_id = $1`,
     [userId]
   );
@@ -563,24 +731,28 @@ const getRatingsData = async (userId) => {
   const reviewsResult = await query(
     `SELECT
        rt.rating_id,
+       rt.rater_id,
        rt.score,
        rt.comment,
-       rt.timestamp,
-       su.first_name AS sender_first_name,
-       su.last_name AS sender_last_name,
+       rt.created_at,
+       rt.updated_at,
+       rt.rater_role,
+       rt.receiver_role,
+       su.first_name AS rater_first_name,
+       su.last_name AS rater_last_name,
        ru.first_name AS receiver_first_name,
        ru.last_name AS receiver_last_name,
        r.ride_id,
        pu.address_name AS pickup,
        du.address_name AS dropoff
-     FROM ratings rt
-     LEFT JOIN users su ON su.user_id = rt.sender_id
+     FROM ride_party_ratings rt
+     LEFT JOIN users su ON su.user_id = rt.rater_id
      LEFT JOIN users ru ON ru.user_id = rt.receiver_id
      LEFT JOIN rides r ON r.ride_id = rt.ride_id
      LEFT JOIN locations pu ON pu.location_id = r.pickup_location_id
      LEFT JOIN locations du ON du.location_id = r.dropoff_location_id
-     WHERE rt.receiver_id = $1 OR rt.sender_id = $1
-     ORDER BY rt.timestamp DESC
+     WHERE rt.receiver_id = $1 OR rt.rater_id = $1
+     ORDER BY COALESCE(rt.updated_at, rt.created_at) DESC
      LIMIT 50`,
     [userId]
   );
@@ -605,13 +777,28 @@ const getRatingsData = async (userId) => {
     },
     reviews: reviewsResult.rows.map((review) => ({
       id: review.rating_id,
+      rating_id: review.rating_id,
+      ride_id: review.ride_id,
       rating: toNumber(review.score),
+      score: toNumber(review.score),
       comment: review.comment,
-      date: review.timestamp,
+      created_at: review.created_at,
+      date: review.created_at,
+      rater_role: review.rater_role,
+      receiver_role: review.receiver_role,
       trip: review.pickup && review.dropoff ? `${review.pickup} -> ${review.dropoff}` : null,
-      sender_name: `${review.sender_first_name || ""} ${review.sender_last_name || ""}`.trim(),
+      sender_name: `${review.rater_first_name || ""} ${review.rater_last_name || ""}`.trim(),
       receiver_name: `${review.receiver_first_name || ""} ${review.receiver_last_name || ""}`.trim(),
-      yourReview: false,
+      yourReview: Number(userId) === Number(review.rater_id),
+    })),
+    ratings: reviewsResult.rows.map((review) => ({
+      rating_id: review.rating_id,
+      ride_id: review.ride_id,
+      score: toNumber(review.score),
+      comment: review.comment,
+      created_at: review.created_at,
+      rater_role: review.rater_role,
+      receiver_role: review.receiver_role,
     })),
   };
 };
@@ -619,6 +806,9 @@ const getRatingsData = async (userId) => {
 module.exports = {
   getUserProfile,
   updateUserProfile,
+  updateUserPassword,
+  updateUserProfilePicture,
+  updateDriverLicenseDocument,
   getWalletData,
   rechargeWallet,
   getTripsHistory,

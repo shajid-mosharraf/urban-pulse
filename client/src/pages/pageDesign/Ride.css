@@ -1,10 +1,40 @@
 /* ===== Layout ===== */
 .ride-container {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 320px minmax(0, 1fr) 360px;
+  grid-template-rows: 1fr 1fr;
+  grid-template-areas:
+    "left map rightTop"
+    "left map rightBottom";
   height: calc(100vh - 70px);
   background: #f4f6f9;
   font-family: Arial, Helvetica, sans-serif;
+  gap: 0;
+}
+
+.ride-loading-banner {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  background: #ffffff;
+  border: 1px solid #dce3ec;
+  border-radius: 10px;
+  padding: 10px 16px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+.ride-left-panel {
+  grid-area: left;
+}
+
+.ride-right-top-panel {
+  grid-area: rightTop;
+}
+
+.ride-right-bottom-panel {
+  grid-area: rightBottom;
 }
 
 .section {
@@ -210,15 +240,52 @@
 
 /* --- LEAFLET MAP STYLES --- */
 .map-section {
+  grid-area: map;
   padding: 0 !important; /* Removes padding so map fills the box */
   overflow: hidden;
+  border-right: 1px solid #ddd;
 }
 
 .leaflet-map-container {
-  height: 350px;
+  height: 100%;
   width: 100%;
-  border-radius: 8px;
+  min-height: 100%;
+  border-radius: 0;
   z-index: 0; /* Keeps map below the dropdowns */
+}
+
+@media (max-width: 1200px) {
+  .ride-container {
+    grid-template-columns: 300px minmax(0, 1fr) 320px;
+  }
+}
+
+@media (max-width: 980px) {
+  .ride-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(360px, 48vh) auto auto;
+    grid-template-areas:
+      "left"
+      "map"
+      "rightTop"
+      "rightBottom";
+    height: auto;
+    min-height: calc(100vh - 70px);
+  }
+
+  .section {
+    border-right: none;
+    border-bottom: 1px solid #ddd;
+  }
+
+  .map-section {
+    border-right: none;
+    border-bottom: 1px solid #ddd;
+  }
+
+  .leaflet-map-container {
+    min-height: 360px;
+  }
 }
 
 /* --- UTILITY SELECTION STYLES --- */

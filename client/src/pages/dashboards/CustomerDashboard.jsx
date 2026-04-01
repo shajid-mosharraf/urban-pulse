@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Layout from "./Layout";
 
@@ -30,11 +30,18 @@ function CustomerDashboard() {
   const [dashboard, setDashboard] = useState(null);
   const [walletData, setWalletData] = useState(null);
   const [profileData, setProfileData] = useState(null);
+  const [profileAddresses, setProfileAddresses] = useState([]);
   const [ratingsData, setRatingsData] = useState(null);
   const [completionOtp, setCompletionOtp] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [rechargeAmount, setRechargeAmount] = useState("");
   const [rechargeMethod, setRechargeMethod] = useState("bkash");
+  const [profilePictureFile, setProfilePictureFile] = useState(null);
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: "",
+  });
 
   const user = useMemo(() => {
     try {
@@ -58,10 +65,13 @@ function CustomerDashboard() {
     return "home";
   }, [location.pathname]);
 
-  const getHeaders = () => ({
-    "Content-Type": "application/json",
-    Authorization: token ? `Bearer ${token}` : "",
-  });
+  const getHeaders = useCallback(
+    () => ({
+      "Content-Type": "application/json",
+      Authorization: token ? `Bearer ${token}` : "",
+    }),
+    [token]
+  );
 
   useEffect(() => {
     const loadData = async () => {
@@ -113,6 +123,7 @@ function CustomerDashboard() {
           }
 
           setProfileData(data.data?.user || null);
+          setProfileAddresses(data.data?.savedAddresses || []);
         }
 
         if (activeSection === "ratings") {
@@ -136,9 +147,16 @@ function CustomerDashboard() {
     };
 
     loadData();
-  }, [activeSection, navigate, token, user?.user_id]);
+  }, [activeSection, getHeaders, navigate, token, user?.user_id]);
 
   const activeRide = dashboard?.activeRide;
+
+  const formatMoney = (value) => {
+    const amount = Number(value || 0);
+    return amount.toLocaleString("en-BD", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+
+  const profileDisplayName = `${profileData?.first_name || ""} ${profileData?.last_name || ""}`.trim() || "Customer";
 
   const handleConfirmCompletion = async () => {
     if (!user?.user_id || !activeRide?.ride_id) {
@@ -269,6 +287,73 @@ function CustomerDashboard() {
     }
   };
 
+  const handleProfilePictureUpload = async () => {
+    if (!user?.user_id || !profilePictureFile) {
+      setError("Please choose a profile picture first.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      setSuccess("");
+
+      const formData = new FormData();
+      formData.append("profile_picture", profilePictureFile);
+
+      const response = await fetch(`${API_BASE}/api/account/${user.user_id}/profile-picture`, {
+        method: "POST",
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        credentials: "include",
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || "Profile picture update failed.");
+      }
+
+      setProfileData((prev) => ({ ...(prev || {}), profile_picture: data?.data?.profile_picture || prev?.profile_picture }));
+      setProfilePictureFile(null);
+      setSuccess("Profile picture updated successfully.");
+    } catch (err) {
+      setError(err.message || "Profile picture update failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordUpdate = async () => {
+    if (!user?.user_id) return;
+
+    try {
+      setLoading(true);
+      setError("");
+      setSuccess("");
+
+      const response = await fetch(`${API_BASE}/api/account/${user.user_id}/password`, {
+        method: "PUT",
+        headers: getHeaders(),
+        credentials: "include",
+        body: JSON.stringify(passwordForm),
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.message || "Password update failed.");
+      }
+
+      setPasswordForm({ current_password: "", new_password: "", confirm_password: "" });
+      setSuccess("Password updated successfully.");
+    } catch (err) {
+      setError(err.message || "Password update failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const renderSection = () => {
     if (loading) {
       return <div className="section-label">Loading dashboard...</div>;
@@ -320,40 +405,86 @@ function CustomerDashboard() {
 
     if (activeSection === "wallet") {
       return (
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title">Wallet</div>
+        <div className="dashboard-stack">
+          <div className="wallet-hero">
+            <div>
+              <div className="wallet-hero-label">Available Balance</div>
+              <div className="wallet-hero-value">
+                {(walletData?.wallet?.currency || "BDT")} {formatMoney(walletData?.wallet?.balance)}
+              </div>
+              <div className="wallet-hero-sub">Last updated: {walletData?.wallet?.last_updated ? new Date(walletData.wallet.last_updated).toLocaleString() : "N/A"}</div>
+            </div>
+            <div className="wallet-hero-chip">Secure Wallet</div>
           </div>
-          <div className="card-body">
-            <div style={{ padding: "14px 20px" }}>
-              <p><strong>Balance:</strong> {walletData?.wallet?.currency || "BDT"} {walletData?.wallet?.balance ?? 0}</p>
 
-              <div style={{ display: "flex", gap: 10, marginTop: 12, marginBottom: 16 }}>
+          <div className="stats-grid wallet-mini-stats">
+            <div className="stat-card">
+              <div className="stat-label">Total Recharged</div>
+              <div className="stat-value">৳ {formatMoney(walletData?.stats?.total_recharged)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Total Spent</div>
+              <div className="stat-value">৳ {formatMoney(walletData?.stats?.total_spent)}</div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Recharge Wallet</div>
+            </div>
+            <div className="card-body">
+              <div className="form-grid profile-card-body">
                 <input
                   type="number"
                   min="1"
                   placeholder="Recharge amount"
                   value={rechargeAmount}
                   onChange={(e) => setRechargeAmount(e.target.value)}
-                  style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)" }}
                 />
                 <select
                   value={rechargeMethod}
                   onChange={(e) => setRechargeMethod(e.target.value)}
-                  style={{ padding: "8px", borderRadius: 8, border: "1px solid var(--border)" }}
                 >
                   <option value="bkash">bKash</option>
                   <option value="nagad">Nagad</option>
                   <option value="card">Card</option>
                 </select>
-                <button
-                  onClick={handleRecharge}
-                  disabled={loading}
-                  style={{ padding: "8px 12px", background: "var(--accent)", color: "white", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}
-                >
-                  Recharge
+                <button className="primary-btn" onClick={handleRecharge} disabled={loading}>
+                  Recharge Now
                 </button>
               </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Recent Transactions</div>
+            </div>
+            <div className="card-body">
+              {walletData?.transactions?.length ? (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Amount</th>
+                      <th>Description</th>
+                      <th>Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {walletData.transactions.slice(0, 12).map((tx) => (
+                      <tr key={tx.transaction_id}>
+                        <td>{tx.type}</td>
+                        <td>৳ {formatMoney(tx.amount)}</td>
+                        <td>{tx.description || "No description"}</td>
+                        <td>{tx.timestamp ? new Date(tx.timestamp).toLocaleString() : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div style={{ padding: "14px 20px", color: "var(--text-light)" }}>No wallet transactions yet.</div>
+              )}
             </div>
           </div>
         </div>
@@ -362,43 +493,116 @@ function CustomerDashboard() {
 
     if (activeSection === "profile") {
       return (
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title">Profile</div>
+        <div className="dashboard-stack">
+          <div className="profile-hero">
+            <div className="profile-avatar-wrap">
+              {profileData?.profile_picture ? (
+                <img className="profile-avatar-img" src={profileData.profile_picture} alt="Profile" />
+              ) : (
+                <div className="profile-avatar-fallback">{profileDisplayName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()}</div>
+              )}
+            </div>
+            <div>
+              <div className="profile-hero-name">{profileDisplayName}</div>
+              <div className="profile-hero-sub">Role: {(profileData?.roles || []).join(", ") || "customer"}</div>
+              <div className="profile-hero-sub">Joined: {profileData?.created_at ? new Date(profileData.created_at).toLocaleDateString() : "N/A"}</div>
+            </div>
           </div>
-          <div className="card-body">
-            <div style={{ padding: "14px 20px", display: "grid", gap: 10 }}>
-              <input
-                value={profileData?.first_name || ""}
-                onChange={(e) => setProfileData((prev) => ({ ...(prev || {}), first_name: e.target.value }))}
-                placeholder="First Name"
-                style={{ padding: "8px", borderRadius: 8, border: "1px solid var(--border)" }}
-              />
-              <input
-                value={profileData?.last_name || ""}
-                onChange={(e) => setProfileData((prev) => ({ ...(prev || {}), last_name: e.target.value }))}
-                placeholder="Last Name"
-                style={{ padding: "8px", borderRadius: 8, border: "1px solid var(--border)" }}
-              />
-              <input
-                value={profileData?.email || ""}
-                onChange={(e) => setProfileData((prev) => ({ ...(prev || {}), email: e.target.value }))}
-                placeholder="Email"
-                style={{ padding: "8px", borderRadius: 8, border: "1px solid var(--border)" }}
-              />
-              <input
-                value={profileData?.phone || ""}
-                onChange={(e) => setProfileData((prev) => ({ ...(prev || {}), phone: e.target.value }))}
-                placeholder="Phone"
-                style={{ padding: "8px", borderRadius: 8, border: "1px solid var(--border)" }}
-              />
-              <button
-                onClick={handleProfileUpdate}
-                disabled={loading}
-                style={{ padding: "8px 12px", background: "var(--accent)", color: "white", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}
-              >
-                Save Profile
-              </button>
+
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Profile Picture</div>
+            </div>
+            <div className="card-body">
+              <div className="profile-card-body">
+                <input type="file" accept="image/*" onChange={(e) => setProfilePictureFile(e.target.files?.[0] || null)} />
+                <button className="primary-btn" onClick={handleProfilePictureUpload} disabled={loading || !profilePictureFile}>
+                  Upload Picture
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Basic Information</div>
+            </div>
+            <div className="card-body">
+              <div className="form-grid profile-card-body">
+                <input
+                  value={profileData?.first_name || ""}
+                  onChange={(e) => setProfileData((prev) => ({ ...(prev || {}), first_name: e.target.value }))}
+                  placeholder="First Name"
+                />
+                <input
+                  value={profileData?.last_name || ""}
+                  onChange={(e) => setProfileData((prev) => ({ ...(prev || {}), last_name: e.target.value }))}
+                  placeholder="Last Name"
+                />
+                <input
+                  value={profileData?.email || ""}
+                  onChange={(e) => setProfileData((prev) => ({ ...(prev || {}), email: e.target.value }))}
+                  placeholder="Email"
+                />
+                <input
+                  value={profileData?.phone || ""}
+                  onChange={(e) => setProfileData((prev) => ({ ...(prev || {}), phone: e.target.value }))}
+                  placeholder="Phone"
+                />
+                <button className="primary-btn" onClick={handleProfileUpdate} disabled={loading}>
+                  Save Profile
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Security</div>
+            </div>
+            <div className="card-body">
+              <div className="form-grid profile-card-body">
+                <input
+                  type="password"
+                  value={passwordForm.current_password}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, current_password: e.target.value }))}
+                  placeholder="Current password"
+                />
+                <input
+                  type="password"
+                  value={passwordForm.new_password}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, new_password: e.target.value }))}
+                  placeholder="New password"
+                />
+                <input
+                  type="password"
+                  value={passwordForm.confirm_password}
+                  onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirm_password: e.target.value }))}
+                  placeholder="Confirm new password"
+                />
+                <button className="primary-btn" onClick={handlePasswordUpdate} disabled={loading}>
+                  Update Password
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <div className="card-title">Saved Addresses</div>
+            </div>
+            <div className="card-body">
+              {profileAddresses?.length ? (
+                <ul className="info-list">
+                  {profileAddresses.slice(0, 10).map((address) => (
+                    <li key={`${address.location_id}-${address.label || "saved"}`}>
+                      <strong>{address.label || "Saved place"}</strong> - {address.address_name}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div style={{ padding: "14px 20px", color: "var(--text-light)" }}>No saved addresses available.</div>
+              )}
             </div>
           </div>
         </div>
@@ -438,11 +642,13 @@ function CustomerDashboard() {
           </div>
           <div className="card-body">
             <div style={{ padding: "14px 20px" }}>
+              <p><strong>Average Rating Received:</strong> {ratingsData?.summary?.averageRating ? `⭐ ${ratingsData.summary.averageRating}` : "No ratings"}</p>
+              <p style={{ marginTop: 6, marginBottom: 12 }}><strong>Total Ratings Received:</strong> {ratingsData?.summary?.totalRatings ?? 0}</p>
               {ratingsData?.ratings?.length ? (
                 <ul className="info-list">
                   {ratingsData.ratings.map((rating) => (
                     <li key={rating.rating_id || `${rating.ride_id}-${rating.created_at}` }>
-                      Ride #{rating.ride_id} - {rating.score} ⭐ - {rating.comment || "No comment"}
+                      Ride #{rating.ride_id} - {rating.score} ⭐ - {rating.comment || "No comment"} ({rating.rater_role} → {rating.receiver_role})
                     </li>
                   ))}
                 </ul>
@@ -588,7 +794,8 @@ function CustomerDashboard() {
                     <th>Distance</th>
                     <th>Fare</th>
                     <th>Status</th>
-                    <th>Rating</th>
+                    <th>Your Rating</th>
+                    <th>Driver Rated You</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -600,12 +807,13 @@ function CustomerDashboard() {
                         <td style={{ color: "var(--text-light)" }}>{r.distance_km} km</td>
                         <td style={{ fontWeight: 700 }}>৳ {r.fare}</td>
                         <td><span className={`pill ${String(r.status).toLowerCase() === "completed" ? "green" : "red"}`}>{r.status}</span></td>
-                        <td>{r.rating ? `⭐ ${r.rating}` : "—"}</td>
+                        <td>{r.my_rating_to_driver ? `⭐ ${r.my_rating_to_driver}` : "—"}</td>
+                        <td>{r.driver_rating_to_customer ? `⭐ ${r.driver_rating_to_customer}` : "—"}</td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={6} style={{ padding: 12, color: "var(--text-light)" }}>No recent rides.</td>
+                      <td colSpan={7} style={{ padding: 12, color: "var(--text-light)" }}>No recent rides.</td>
                     </tr>
                   )}
                 </tbody>

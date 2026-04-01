@@ -86,10 +86,23 @@ function Layout() {
         
         {/* Driver Route */}
         <Route path="/dashboard/driver" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/requests" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/active" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/history" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/earnings" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/wallet" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/vehicle" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/documents" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/ratings" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/driver/profile" element={<ProtectedRoute allowedRoles={["driver"]}><DriverDashboard /></ProtectedRoute>} />
 
         {/* Restaurant/Admin Routes */}
         <Route path="/dashboard/restaurant" element={<ProtectedRoute allowedRoles={["restaurant"]}><RestaurantDashboard /></ProtectedRoute>} />
         <Route path="/dashboard/admin" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/admin/drivers" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/admin/restaurants" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/admin/promos" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/admin/reports" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
 
         {/* Legacy Routes */}
         <Route path="/customer" element={<ProtectedRoute allowedRoles={["customer"]}><Navigate to="/dashboard/customer" replace /></ProtectedRoute>} />

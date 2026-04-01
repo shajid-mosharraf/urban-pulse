@@ -86,6 +86,21 @@ const getAdminDashboardData = async (userId) => {
      ORDER BY amount DESC`
   );
 
+  const pendingRestaurantVerificationsResult = await query(
+    `SELECT
+       o.user_id,
+       u.first_name,
+       u.last_name,
+       u.email,
+       u.created_at
+     FROM owners o
+     JOIN users u ON u.user_id = o.user_id
+     WHERE o.manager_approved = FALSE
+       AND u.active = TRUE
+     ORDER BY u.created_at DESC
+     LIMIT 8`
+  );
+
   const stats = platformStatsResult.rows[0] || {};
 
   return {
@@ -121,6 +136,13 @@ const getAdminDashboardData = async (userId) => {
     paymentsOverview: paymentsOverviewResult.rows.map((p) => ({
       method: p.method,
       amount: toNumber(p.amount),
+    })),
+    pendingRestaurantVerifications: pendingRestaurantVerificationsResult.rows.map((r) => ({
+      user_id: r.user_id,
+      name: `${r.first_name || ""} ${r.last_name || ""}`.trim(),
+      manager_name: `${r.first_name || ""} ${r.last_name || ""}`.trim(),
+      email: r.email,
+      created_at: r.created_at,
     })),
   };
 };

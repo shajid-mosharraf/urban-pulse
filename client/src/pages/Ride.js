@@ -535,13 +535,13 @@ const RidePage = () => {
   return (
     <div className="ride-container">
       {isHydratingRide && (
-        <div className="section" style={{ textAlign: "center" }}>
+        <div className="ride-loading-banner">
           <p><strong>Loading your active ride...</strong></p>
         </div>
       )}
 
       {/* ================= SECTION 1: SEARCH & RIDE INFO ================= */}
-      <div className="section">
+      <div className="section ride-left-panel">
         {currentRide ? (
           <>
             <h2>Ride Info</h2>
@@ -617,13 +617,12 @@ const RidePage = () => {
       </div>
 
       {/* ================= SECTION 2: MAP ================= */}
-      {(pickupCoords || destCoords) && (
-        <div className="section map-section">
-          <MapContainer 
-            center={pickupCoords || [23.8103, 90.4125]} 
-            zoom={13} 
-            className="leaflet-map-container"
-          >
+      <div className="section map-section">
+        <MapContainer
+          center={pickupCoords || [23.8103, 90.4125]}
+          zoom={13}
+          className="leaflet-map-container"
+        >
             {/* Sleek Light Theme (Carto Voyager) */}
 <TileLayer 
   url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
@@ -651,14 +650,13 @@ const RidePage = () => {
   </>
 )}
             
-            <MapUpdater bounds={mapBounds} />
-          </MapContainer>
-        </div>
-      )}
+          <MapUpdater bounds={mapBounds} />
+        </MapContainer>
+      </div>
 
       {/* ================= SECTION 3: VEHICLES & DRIVER STATUS ================= */}
       {/* ================= SECTION 3: VEHICLES & DRIVER STATUS ================= */}
-      <div className="section">
+      <div className="section ride-right-top-panel">
         
         {/* State 1: Before confirming ride (Show Vehicles) */}
         {!isHydratingRide && !currentRide && prices && (
@@ -705,27 +703,6 @@ const RidePage = () => {
               <p><strong>Phone:</strong> {assignedDriver.phone}</p>
               {pickupOtpCode && <p><strong>Pickup OTP:</strong> {pickupOtpCode}</p>}
               {completionOtpCode && <p><strong>Completion OTP:</strong> {completionOtpCode}</p>}
-              {rideStatus === "waiting_completion_otp" && (
-                <div style={{ marginTop: "8px" }}>
-                  <p style={{ margin: "6px 0" }}><strong>Enter completion OTP to finish ride:</strong></p>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <input
-                      value={completionOtpInput}
-                      onChange={(e) => setCompletionOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                      placeholder="Enter completion OTP"
-                      inputMode="numeric"
-                      maxLength={6}
-                      style={{ flex: 1, minWidth: 0, marginBottom: 0 }}
-                    />
-                    <button onClick={confirmCompletionOtp} style={{ width: "auto", marginTop: 0, padding: "10px 14px" }}>Confirm</button>
-                  </div>
-                  {completionMessage && (
-                    <p style={{ marginTop: "8px", color: completionMessage.toLowerCase().includes("success") ? "#198754" : "#dc3545" }}>
-                      {completionMessage}
-                    </p>
-                  )}
-                </div>
-              )}
             </div>
             {rideStatus === "driver_assigned" && (
               <button onClick={cancelRide} style={{ marginTop: "15px", backgroundColor: "#dc3545", color: "white", width: "100%" }}>
@@ -737,7 +714,7 @@ const RidePage = () => {
       </div>
 
       {/* ================= SECTION 4: PAYMENT & CHAT ================= */}
-      <div className="section">
+      <div className="section ride-right-bottom-panel">
         {!isHydratingRide && !currentRide ? (
           <>
             <h2>Payment</h2>
@@ -791,6 +768,28 @@ const RidePage = () => {
               />
               <button onClick={sendMessage}>Send</button>
             </div>
+
+            {rideStatus === "waiting_completion_otp" && (
+              <div style={{ marginTop: "12px", padding: "12px", background: "#fff7e6", border: "1px solid #ffe08a", borderRadius: "8px" }}>
+                <p style={{ margin: "0 0 8px 0" }}><strong>Enter completion OTP to finish ride:</strong></p>
+                <div style={{ display: "flex", gap: "8px" }}>
+                  <input
+                    value={completionOtpInput}
+                    onChange={(e) => setCompletionOtpInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="Enter completion OTP"
+                    inputMode="numeric"
+                    maxLength={6}
+                    style={{ flex: 1, minWidth: 0, marginBottom: 0 }}
+                  />
+                  <button onClick={confirmCompletionOtp} style={{ width: "auto", marginTop: 0, padding: "10px 14px" }}>Confirm</button>
+                </div>
+                {completionMessage && (
+                  <p style={{ marginTop: "8px", marginBottom: 0, color: completionMessage.toLowerCase().includes("success") ? "#198754" : "#dc3545" }}>
+                    {completionMessage}
+                  </p>
+                )}
+              </div>
+            )}
           </>
         ) : rideStatus === "completed" ? (
           <>

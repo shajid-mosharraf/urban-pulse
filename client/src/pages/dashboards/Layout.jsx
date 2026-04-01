@@ -19,7 +19,7 @@ const roleColors = {
  *  statusLabel — text shown in topbar badge (e.g. "Active", "Online", "Open")
  *  children    — page content
  */
-function Layout({ role, navItems, children, userName, statusLabel }) {
+function Layout({ role, navItems, children, userName, statusLabel, profileMenuItems = [] }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [activeNav, setActiveNav] = useState(navItems[0]?.id);
@@ -74,6 +74,29 @@ function Layout({ role, navItems, children, userName, statusLabel }) {
             <div className="user-role">{role}</div>
           </div>
         </div>
+
+        {profileMenuItems.length > 0 && (
+          <div className="sidebar-profile-menu">
+            <div className="sidebar-profile-title">Profile Menu</div>
+            <div className="sidebar-profile-actions">
+              {profileMenuItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="sidebar-profile-btn"
+                  onClick={() => {
+                    if (item.path) {
+                      navigate(item.path);
+                    }
+                  }}
+                >
+                  <span>{item.icon}</span>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <nav className="sidebar-nav">
           {navItems.map((item) =>

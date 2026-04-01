@@ -142,7 +142,12 @@ const getDriverDashboardData = async (userId) => {
          WHEN DATE(r.end_time) = CURRENT_DATE AND LOWER(r.status) = 'completed'
          THEN 1
          ELSE NULL
-       END) AS trips_today
+       END) AS trips_today,
+       COUNT(CASE
+         WHEN LOWER(r.status) = 'completed'
+         THEN 1
+         ELSE NULL
+       END) AS total_completed_rides
      FROM rides r
      LEFT JOIN payments p ON p.ride_id = r.ride_id
      WHERE r.driver_id = $1`,
@@ -282,6 +287,67 @@ const getDriverDashboardData = async (userId) => {
     }
   }
 
+  let lastRidesResult;
+  try {
+    lastRidesResult = await query(
+      `SELECT
+         r.ride_id,
+         r.status,
+         COALESCE(r.final_fare, r.initial_fare, p.amount, 0) AS fare,
+         COALESCE(r.end_time, r.request_time) AS event_time,
+         pu.address_name AS pickup,
+         du.address_name AS dropoff,
+         cu.first_name AS customer_first_name,
+         cu.last_name AS customer_last_name,
+         pr.score AS my_rating_to_customer,
+         crt.score AS customer_rating_to_driver
+       FROM rides r
+       LEFT JOIN payments p ON p.ride_id = r.ride_id
+       LEFT JOIN locations pu ON pu.location_id = r.pickup_location_id
+       LEFT JOIN locations du ON du.location_id = r.dropoff_location_id
+       LEFT JOIN customers c ON c.user_id = r.customer_id
+       LEFT JOIN users cu ON cu.user_id = c.user_id
+       LEFT JOIN ride_party_ratings pr ON pr.ride_id = r.ride_id
+        AND pr.rater_id = r.driver_id
+        AND pr.receiver_id = r.customer_id
+       LEFT JOIN ride_party_ratings crt ON crt.ride_id = r.ride_id
+        AND crt.rater_id = r.customer_id
+        AND crt.receiver_id = r.driver_id
+       WHERE r.driver_id = $1
+       ORDER BY COALESCE(r.end_time, r.request_time) DESC
+       LIMIT 3`,
+      [userId]
+    );
+  } catch (err) {
+    if (String(err?.message || "").toLowerCase().includes("relation \"ride_party_ratings\" does not exist")) {
+      lastRidesResult = await query(
+        `SELECT
+           r.ride_id,
+           r.status,
+           COALESCE(r.final_fare, r.initial_fare, p.amount, 0) AS fare,
+           COALESCE(r.end_time, r.request_time) AS event_time,
+           pu.address_name AS pickup,
+           du.address_name AS dropoff,
+           cu.first_name AS customer_first_name,
+           cu.last_name AS customer_last_name,
+           NULL::INT AS my_rating_to_customer,
+           NULL::INT AS customer_rating_to_driver
+         FROM rides r
+         LEFT JOIN payments p ON p.ride_id = r.ride_id
+         LEFT JOIN locations pu ON pu.location_id = r.pickup_location_id
+         LEFT JOIN locations du ON du.location_id = r.dropoff_location_id
+         LEFT JOIN customers c ON c.user_id = r.customer_id
+         LEFT JOIN users cu ON cu.user_id = c.user_id
+         WHERE r.driver_id = $1
+         ORDER BY COALESCE(r.end_time, r.request_time) DESC
+         LIMIT 3`,
+        [userId]
+      );
+    } else {
+      throw err;
+    }
+  }
+
   const weeklyTrendResult = await query(
     `SELECT
        TO_CHAR(day_ref, 'Dy') AS day_label,
@@ -305,6 +371,7 @@ const getDriverDashboardData = async (userId) => {
     week_earnings: 0,
     month_earnings: 0,
     trips_today: 0,
+    total_completed_rides: 0,
   };
 
   return {
@@ -322,6 +389,7 @@ const getDriverDashboardData = async (userId) => {
       week: toNumber(e.week_earnings),
       month: toNumber(e.month_earnings),
       trips_today: toNumber(e.trips_today),
+      total_completed_rides: toNumber(e.total_completed_rides),
     },
     incomingRequests: incomingRequestsResult.rows.map((r) => ({
       ride_id: r.ride_id,
@@ -373,6 +441,23 @@ const getDriverDashboardData = async (userId) => {
     weeklyTrend: weeklyTrendResult.rows.map((d) => ({
       day: d.day_label,
       amount: toNumber(d.amount),
+    })),
+    lastRides: lastRidesResult.rows.map((r) => ({
+      ride_id: r.ride_id,
+      status: r.status,
+      fare: toNumber(r.fare),
+      event_time: r.event_time,
+      pickup: r.pickup,
+      dropoff: r.dropoff,
+      customer_name: `${r.customer_first_name || ""} ${r.customer_last_name || ""}`.trim(),
+      my_rating_to_customer:
+        r.my_rating_to_customer !== null && r.my_rating_to_customer !== undefined
+          ? toNumber(r.my_rating_to_customer)
+          : null,
+      customer_rating_to_driver:
+        r.customer_rating_to_driver !== null && r.customer_rating_to_driver !== undefined
+          ? toNumber(r.customer_rating_to_driver)
+          : null,
     })),
   };
 };

@@ -83,6 +83,43 @@ body { font-family: 'DM Sans', sans-serif; background: var(--content-bg); }
   align-items: center;
   gap: 10px;
 }
+.sidebar-profile-menu {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.sidebar-profile-title {
+  font-size: 10px;
+  color: rgba(160,160,176,0.8);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin: 0 8px 8px;
+  font-weight: 600;
+}
+.sidebar-profile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sidebar-profile-btn {
+  width: 100%;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.03);
+  color: #d3d5dd;
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'DM Sans', sans-serif;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.sidebar-profile-btn:hover {
+  background: rgba(249,115,22,0.15);
+  border-color: rgba(249,115,22,0.5);
+  color: #fff;
+}
 .user-avatar {
   width: 36px; height: 36px;
   border-radius: 50%;
@@ -516,3 +553,178 @@ body { font-family: 'DM Sans', sans-serif; background: var(--content-bg); }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.dashboard-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.wallet-hero {
+  background: linear-gradient(135deg, #171e2a 0%, #222f45 60%, #2c3e5b 100%);
+  border-radius: var(--radius);
+  color: #f8fafc;
+  padding: 22px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  box-shadow: var(--shadow-lg);
+}
+
+.wallet-hero-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.wallet-hero-value {
+  margin-top: 6px;
+  font-family: 'Syne', sans-serif;
+  font-size: clamp(24px, 4vw, 36px);
+  font-weight: 800;
+}
+
+.wallet-hero-sub {
+  margin-top: 5px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.wallet-hero-chip {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wallet-mini-stats {
+  margin-bottom: 0;
+}
+
+.profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: linear-gradient(140deg, #fff7ed 0%, #ffedd5 100%);
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.profile-avatar-wrap {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 3px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+.profile-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-avatar-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Syne', sans-serif;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #f97316, #fb923c);
+}
+
+.profile-hero-name {
+  font-family: 'Syne', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: #171717;
+}
+
+.profile-hero-sub {
+  font-size: 12px;
+  color: #525252;
+  margin-top: 3px;
+}
+
+.profile-card-body {
+  padding: 14px 20px;
+  display: grid;
+  gap: 10px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.form-grid input,
+.form-grid select,
+.profile-card-body input,
+.profile-card-body select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.primary-btn,
+.link-btn {
+  border: none;
+  border-radius: 9px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  width: fit-content;
+}
+
+.primary-btn {
+  color: #fff;
+  background: linear-gradient(90deg, #f97316 0%, #ea580c 100%);
+}
+
+.primary-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.link-btn {
+  text-decoration: none;
+  color: #0f172a;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+}
+
+.profile-data-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .form-grid,
+  .profile-data-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .wallet-hero-chip {
+    white-space: normal;
+  }
+}

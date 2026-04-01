@@ -29,6 +29,36 @@ const updateProfile = async (req, res) => {
   }
 };
 
+const updatePassword = async (req, res) => {
+  try {
+    const userId = parseUserId(req.params.userId);
+    const data = await accountService.updateUserPassword(userId, req.body || {});
+    return sendSuccess(res, 200, "Password updated successfully.", data);
+  } catch (err) {
+    return sendError(res, err.status || 500, err.message || "Failed to update password.");
+  }
+};
+
+const updateProfilePicture = async (req, res) => {
+  try {
+    const userId = parseUserId(req.params.userId);
+    const data = await accountService.updateUserProfilePicture(userId, req.file);
+    return sendSuccess(res, 200, "Profile picture updated successfully.", data);
+  } catch (err) {
+    return sendError(res, err.status || 500, err.message || "Failed to update profile picture.");
+  }
+};
+
+const updateDriverLicenseDocument = async (req, res) => {
+  try {
+    const userId = parseUserId(req.params.userId);
+    const data = await accountService.updateDriverLicenseDocument(userId, req.file);
+    return sendSuccess(res, 200, "Driver license document updated successfully.", data);
+  } catch (err) {
+    return sendError(res, err.status || 500, err.message || "Failed to update driver license document.");
+  }
+};
+
 const getWallet = async (req, res) => {
   try {
     const userId = parseUserId(req.params.userId);
@@ -152,6 +182,9 @@ const getRatings = async (req, res) => {
 module.exports = {
   getProfile,
   updateProfile,
+  updatePassword,
+  updateProfilePicture,
+  updateDriverLicenseDocument,
   getWallet,
   rechargeWallet,
   getTrips,
