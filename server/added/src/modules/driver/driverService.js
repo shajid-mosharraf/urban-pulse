@@ -1,4 +1,5 @@
 const { getClient, query } = require("../../config/db");
+const { getIo } = require("../../realtime/socketState");
 const rideService = require("../ride/rideService");
 
 const toNumber = (value) => Number(value || 0);
@@ -481,6 +482,8 @@ const acceptRideRequest = async (driverId, rideId) => {
   };
 };
 
+const randomOtp = () => String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+
 const startActiveRide = async (driverId, rideId, otp) => {
   const normalizedOtp = String(otp || "").trim();
 
@@ -527,17 +530,99 @@ const startActiveRide = async (driverId, rideId, otp) => {
        SET status = 'in_progress',
            start_time = COALESCE(start_time, CURRENT_TIMESTAMP)
        WHERE ride_id = $1
-       RETURNING ride_id, status, start_time`,
+       RETURNING ride_id, status, start_time, customer_id`,
       [rideId]
     );
 
-    await client.query(
-      `INSERT INTO ride_completion_details (ride_id, otp_verified_at, updated_at)
-       VALUES ($1, CURRENT_TIMESTAMP, NOW())
+    // Generate completion OTP
+    const completionOtp = randomOtp();
+
+    const otpUpdateResult = await client.query(
+      `INSERT INTO ride_completion_details (ride_id, otp_verified_at, completion_otp, updated_at)
+       VALUES ($1, CURRENT_TIMESTAMP, $2, NOW())
        ON CONFLICT (ride_id)
-       DO UPDATE SET otp_verified_at = CURRENT_TIMESTAMP, updated_at = NOW()`,
+       DO UPDATE SET otp_verified_at = CURRENT_TIMESTAMP, completion_otp = $2, updated_at = NOW()
+       RETURNING completion_otp`,
+      [rideId, completionOtp]
+    );
+
+    const savedCompletionOtp = otpUpdateResult.rows[0]?.completion_otp || completionOtp;
+
+    await client.query(
+      `UPDATE food_orders
+       SET status = 'on_the_way'
+       WHERE ride_id = $1
+         AND LOWER(status) = 'ready_for_delivery'`,
       [rideId]
     );
+
+    // Send completion OTP to customer via chat
+    try {
+      const customerId = Number(rideResult.rows[0]?.customer_id || 0);
+      
+      // Create/get conversation
+      await client.query(
+        `INSERT INTO conversations (ride_id)
+         SELECT $1
+         WHERE NOT EXISTS (
+           SELECT 1 FROM conversations WHERE ride_id = $1
+         )`,
+        [rideId]
+      );
+
+      // Get restaurant owner
+      const restaurantInfo = await client.query(
+        `SELECT r.owner_id
+         FROM food_orders fo
+         JOIN restaurants r ON r.restaurant_id = fo.restaurant_id
+         WHERE fo.ride_id = $1
+         ORDER BY fo.order_time DESC
+         LIMIT 1`,
+        [rideId]
+      );
+
+      const restaurantOwnerId = Number(restaurantInfo.rows[0]?.owner_id || 0);
+      
+      if (restaurantOwnerId > 0 && customerId > 0) {
+        const conversationRow = await client.query(
+          `SELECT conversation_id
+           FROM conversations
+           WHERE ride_id = $1
+           ORDER BY conversation_id DESC
+           LIMIT 1`,
+          [rideId]
+        );
+
+        const conversationId = Number(conversationRow.rows[0]?.conversation_id || 0);
+        const completionOtpMessage = `Delivery Completion OTP: ${savedCompletionOtp}`;
+
+        if (conversationId > 0) {
+          await client.query(
+            `INSERT INTO messages (conversation_id, sender_id, content, timestamp)
+             VALUES ($1, $2, $3, NOW())`,
+            [conversationId, restaurantOwnerId, completionOtpMessage]
+          );
+        }
+      }
+
+      const io = getIo();
+      if (io) {
+        io.to(`ride_${rideId}`).emit("delivery_completion_otp_ready", {
+          ride_id: rideId,
+          completion_otp: savedCompletionOtp,
+          status: "in_progress",
+        });
+      }
+    } catch (chatErr) {
+      // Continue even if chat fails - main operation succeeded
+      const msg = String(chatErr?.message || "").toLowerCase();
+      if (
+        !msg.includes("relation \"conversations\" does not exist") &&
+        !msg.includes("relation \"messages\" does not exist")
+      ) {
+        throw chatErr;
+      }
+    }
 
     await client.query("COMMIT");
     return rideResult.rows[0];
@@ -584,7 +669,16 @@ const endActiveRide = async (driverId, rideId) => {
       };
     }
 
-    const completionOtp = String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+    // Get existing completion OTP (sent to customer when ride became on_the_way)
+    const completionDetailsResult = await client.query(
+      `SELECT completion_otp FROM ride_completion_details WHERE ride_id = $1`,
+      [rideId]
+    );
+    
+    let completionOtp = completionDetailsResult.rows[0]?.completion_otp;
+    if (!completionOtp) {
+      completionOtp = randomOtp();
+    }
 
     const rideStatusResult = await client.query(
       `UPDATE rides
@@ -607,16 +701,13 @@ const endActiveRide = async (driverId, rideId) => {
          ride_id,
          driver_marked_complete_at,
          completion_otp,
-         ride_otp,
          completion_mode,
          updated_at
        )
-       VALUES ($1, CURRENT_TIMESTAMP, $2, $2, 'waiting_customer_otp', NOW())
+       VALUES ($1, CURRENT_TIMESTAMP, $2, 'waiting_customer_otp', NOW())
        ON CONFLICT (ride_id)
        DO UPDATE
        SET driver_marked_complete_at = CURRENT_TIMESTAMP,
-           completion_otp = EXCLUDED.completion_otp,
-           ride_otp = EXCLUDED.ride_otp,
            completion_mode = 'waiting_customer_otp',
            updated_at = NOW()
        RETURNING driver_marked_complete_at, completion_otp, completion_mode`,
@@ -628,7 +719,7 @@ const endActiveRide = async (driverId, rideId) => {
     return {
       ...rideStatusResult.rows[0],
       driver_marked_complete_at: detailsResult.rows[0]?.driver_marked_complete_at || null,
-      completion_otp: detailsResult.rows[0]?.completion_otp || completionOtp,
+      completion_otp: completionOtp,
       completion_mode: detailsResult.rows[0]?.completion_mode || "waiting_customer_otp",
     };
   } catch (err) {

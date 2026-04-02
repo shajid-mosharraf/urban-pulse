@@ -321,6 +321,21 @@ function DriverDashboard() {
       if (!response.ok || !data?.success) {
         throw new Error(data?.message || "Unable to accept ride.");
       }
+
+      const restaurantMessage = data?.data?.restaurant_chat_message;
+      if (restaurantMessage?.text) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            ride_id: rideId,
+            sender_id: restaurantMessage.sender_id,
+            sender_role: "restaurant",
+            text: restaurantMessage.text,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      }
+
       setActionMessage("Ride accepted.");
       navigate("/dashboard/driver/active");
       await loadDashboard();
@@ -757,27 +772,34 @@ function DriverDashboard() {
           )}
 
           {(rideStatus === "accepted" || rideStatus === "driver_assigned") && (
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                value={pickupOtp}
-                onChange={(e) => setPickupOtp(e.target.value)}
-                placeholder="Pickup OTP"
-                style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)" }}
-              />
-              <button
-                style={{
-                  padding: "8px 12px",
-                  background: "var(--accent)",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 8,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                }}
-                onClick={startRide}
-              >
-                OTP Check & Pick Up
-              </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {!!dashboard.activeRide.pickup_otp && (
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#0f766e" }}>
+                  Restaurant Pickup OTP: {dashboard.activeRide.pickup_otp}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  value={pickupOtp}
+                  onChange={(e) => setPickupOtp(e.target.value)}
+                  placeholder="Enter Pickup OTP"
+                  style={{ flex: 1, padding: "8px", borderRadius: 8, border: "1px solid var(--border)" }}
+                />
+                <button
+                  style={{
+                    padding: "8px 12px",
+                    background: "var(--accent)",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 8,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                  onClick={startRide}
+                >
+                  OTP Check & Pick Up
+                </button>
+              </div>
             </div>
           )}
 

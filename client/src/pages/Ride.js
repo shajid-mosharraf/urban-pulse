@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-
 import { OpenStreetMapProvider } from "leaflet-geosearch";
 import L from "leaflet";
 import io from "socket.io-client";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import "leaflet/dist/leaflet.css";
 import "./pageDesign/Ride.css";
 
@@ -55,14 +55,19 @@ const normalizeRideStatus = (status) => {
   return null;
 };
 
-const RidePage = () => {
+const RidePage = ({ rideMode: rideModeOverride = null }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   // Free GraphHopper Key
   const GRAPHHOPPER_KEY = "5aafda93-5123-4de4-a72d-fee29fc1e489"; // Paste your key here
   const userString = localStorage.getItem("user");
   const loggedInUser = userString ? JSON.parse(userString) : null;
   const actualUserId = loggedInUser ? loggedInUser.user_id : null;
   const accessToken = localStorage.getItem("accessToken");
+  const rideMode = rideModeOverride || (location.pathname.toLowerCase().includes("/delivery-ride") ? "delivery" : "normal");
+  const isDeliveryMode = rideMode === "delivery";
+  const rideHeading = rideMode === "delivery" ? "Book Delivery Ride" : "Book Ride";
+  const rideInfoHeading = rideMode === "delivery" ? "Delivery Ride Info" : "Ride Info";
 
   // Input & Dropdown States
   const [pickup, setPickup] = useState("");
@@ -111,6 +116,56 @@ const RidePage = () => {
     cng: { base: 50, perKm: 18 },
     car: { base: 80, perKm: 25 },
     micro: { base: 100, perKm: 30 },
+  };
+
+  const fetchRouteAndMetrics = async (startCoords, endCoords, options = {}) => {
+    const { showAlertOnMissingCoords = false } = options;
+
+    if (!startCoords || !endCoords) {
+      if (showAlertOnMissingCoords) {
+        alert("Please select locations from the dropdown suggestions.");
+      }
+      return false;
+    }
+
+    try {
+      const url = `https://graphhopper.com/api/1/route?point=${startCoords[0]},${startCoords[1]}&point=${endCoords[0]},${endCoords[1]}&vehicle=car&locale=en&points_encoded=false&key=${GRAPHHOPPER_KEY}`;
+
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (data.paths && data.paths.length > 0) {
+        const path = data.paths[0];
+        const realDistance = Number(path.distance / 1000).toFixed(1);
+        const realEta = Math.round(path.time / 60000);
+        const formattedRoute = path.points.coordinates.map((coord) => [coord[1], coord[0]]);
+
+        setRouteLine(formattedRoute);
+        setMapBounds([startCoords, endCoords]);
+        setDistance(realDistance);
+        setEta(realEta);
+
+        const calculatedPrices = {};
+        Object.keys(vehicleRates).forEach((type) => {
+          const rate = vehicleRates[type];
+          calculatedPrices[type] = Math.round(rate.base + Number(realDistance) * rate.perKm);
+        });
+
+        setPrices(calculatedPrices);
+        return true;
+      }
+
+      if (showAlertOnMissingCoords) {
+        alert("Could not calculate a route between these points.");
+      }
+      return false;
+    } catch (error) {
+      console.error("Routing error:", error);
+      if (showAlertOnMissingCoords) {
+        alert("Error connecting to routing service.");
+      }
+      return false;
+    }
   };
 
   const confirmCompletionOtp = async () => {
@@ -206,10 +261,23 @@ const RidePage = () => {
         const dashboard = data.data || {};
         const activeRide = dashboard.activeRide;
         const mappedStatus = normalizeRideStatus(activeRide?.status);
+        const activeRideKind = String(activeRide?.ride_kind || "normal").toLowerCase();
+        const rideMatchesMode = rideMode === "delivery"
+          ? activeRideKind === "delivery"
+          : activeRideKind !== "delivery";
 
-        if (!activeRide?.ride_id || !mappedStatus || ["completed", "cancelled"].includes(mappedStatus)) {
+        if (!activeRide?.ride_id || !mappedStatus || ["completed", "cancelled"].includes(mappedStatus) || !rideMatchesMode) {
           return;
         }
+
+        const restoredPickupCoords =
+          activeRide.pickup_latitude !== null && activeRide.pickup_longitude !== null
+            ? [Number(activeRide.pickup_latitude), Number(activeRide.pickup_longitude)]
+            : null;
+        const restoredDropoffCoords =
+          activeRide.dropoff_latitude !== null && activeRide.dropoff_longitude !== null
+            ? [Number(activeRide.dropoff_latitude), Number(activeRide.dropoff_longitude)]
+            : null;
 
         setCurrentRide({
           ride_id: activeRide.ride_id,
@@ -219,6 +287,17 @@ const RidePage = () => {
           price: activeRide.fare || 0,
           payment: activeRide.payment_method || "cash",
         });
+
+        if (restoredPickupCoords && restoredDropoffCoords) {
+          setPickupCoords(restoredPickupCoords);
+          setDestCoords(restoredDropoffCoords);
+          setPickup(activeRide.pickup || "");
+          setDestination(activeRide.dropoff || "");
+          fetchRouteAndMetrics(restoredPickupCoords, restoredDropoffCoords, {
+            showAlertOnMissingCoords: false,
+          });
+        }
+
         setRideStatus(mappedStatus);
         setRequestTime(activeRide.request_time ? new Date(activeRide.request_time).toLocaleTimeString() : null);
         setPickupOtpCode(activeRide.pickup_otp || null);
@@ -246,7 +325,7 @@ const RidePage = () => {
     };
 
     restoreActiveRide();
-  }, [actualUserId, accessToken]);
+  }, [actualUserId, accessToken, rideMode]);
   
   const geoProvider = new OpenStreetMapProvider({
     params: {
@@ -297,42 +376,7 @@ const RidePage = () => {
 
   // --- ROUTING LOGIC ---
   const calculateRide = async () => {
-    if (!pickupCoords || !destCoords) {
-      return alert("Please select locations from the dropdown suggestions.");
-    }
-
-    try {
-      const url = `https://graphhopper.com/api/1/route?point=${pickupCoords[0]},${pickupCoords[1]}&point=${destCoords[0]},${destCoords[1]}&vehicle=car&locale=en&points_encoded=false&key=${GRAPHHOPPER_KEY}`;
-      
-      const response = await fetch(url);
-      const data = await response.json();
-
-      if (data.paths && data.paths.length > 0) {
-        const path = data.paths[0];
-        const realDistance = (path.distance / 1000).toFixed(1); // km
-        const realEta = Math.round(path.time / 60000); // mins
-
-        const formattedRoute = path.points.coordinates.map(coord => [coord[1], coord[0]]);
-        
-        setRouteLine(formattedRoute);
-        setMapBounds([pickupCoords, destCoords]);
-        setDistance(realDistance);
-        setEta(realEta);
-
-        const calculatedPrices = {};
-        Object.keys(vehicleRates).forEach((type) => {
-          const rate = vehicleRates[type];
-          calculatedPrices[type] = Math.round(rate.base + realDistance * rate.perKm);
-        });
-
-        setPrices(calculatedPrices);
-      } else {
-        alert("Could not calculate a route between these points.");
-      }
-    } catch (error) {
-      console.error("Routing error:", error);
-      alert("Error connecting to routing service.");
-    }
+    await fetchRouteAndMetrics(pickupCoords, destCoords, { showAlertOnMissingCoords: true });
   };
 
   const confirmRide = async () => {
@@ -544,7 +588,7 @@ const RidePage = () => {
       <div className="section ride-left-panel">
         {currentRide ? (
           <>
-            <h2>Ride Info</h2>
+            <h2>{rideInfoHeading}</h2>
             <p><strong>Status:</strong> {
               rideStatus === "waiting_driver" ? "Waiting for driver..." :
               rideStatus === "driver_assigned" ? "Driver Assigned" :
@@ -563,8 +607,21 @@ const RidePage = () => {
             {completionOtpCode && <p><strong>Completion OTP:</strong> {completionOtpCode}</p>}
           </>
         ) : !isHydratingRide ? (
+          isDeliveryMode ? (
+            <>
+              <h2>Delivery Ride Center</h2>
+              <p><strong>Status:</strong> No active delivery ride right now.</p>
+              <p>
+                Delivery rides are created when you place a food order. Open Food Delivery to
+                create one, then return here to view the route and rider details.
+              </p>
+              <button onClick={() => navigate("/food-service")} style={{ width: "100%", marginTop: "10px" }}>
+                Go to Food Delivery
+              </button>
+            </>
+          ) : (
           <>
-            <h2>Book Ride</h2>
+            <h2>{rideHeading}</h2>
             
             <div className="autocomplete-wrapper">
               <input
@@ -611,6 +668,7 @@ const RidePage = () => {
               </div>
             )}
           </>
+          )
         ) : (
           null
         )}
@@ -659,7 +717,7 @@ const RidePage = () => {
       <div className="section ride-right-top-panel">
         
         {/* State 1: Before confirming ride (Show Vehicles) */}
-        {!isHydratingRide && !currentRide && prices && (
+        {!isDeliveryMode && !isHydratingRide && !currentRide && prices && (
           <>
             <h2>Select Vehicle</h2>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
@@ -679,7 +737,17 @@ const RidePage = () => {
         )}
 
         {/* State 2: Ride Confirmed, Waiting for Driver to Accept */}
-        {currentRide && !assignedDriver && rideStatus === "waiting_driver" && (
+        {isDeliveryMode && !currentRide && !isHydratingRide && (
+          <>
+            <h2>Delivery Status</h2>
+            <div className="driver-info" style={{ background: "#fff3cd", padding: "15px", borderRadius: "5px", textAlign: "center" }}>
+              <h4 style={{ margin: 0, color: "#856404" }}>No active delivery ride</h4>
+              <p style={{ margin: "5px 0 0 0", color: "#856404" }}>Place a food order to create a delivery ride.</p>
+            </div>
+          </>
+        )}
+
+        {!isDeliveryMode && currentRide && !assignedDriver && rideStatus === "waiting_driver" && (
           <>
             <h2>Driver Status</h2>
             <div className="driver-info" style={{ background: "#fff3cd", padding: "15px", borderRadius: "5px", textAlign: "center" }}>
@@ -715,7 +783,7 @@ const RidePage = () => {
 
       {/* ================= SECTION 4: PAYMENT & CHAT ================= */}
       <div className="section ride-right-bottom-panel">
-        {!isHydratingRide && !currentRide ? (
+        {!isDeliveryMode && !isHydratingRide && !currentRide ? (
           <>
             <h2>Payment</h2>
             <div style={{ display: "flex", gap: "10px" }}>
@@ -740,6 +808,13 @@ const RidePage = () => {
                 Confirm Ride
               </button>
             )}
+          </>
+        ) : isDeliveryMode && !currentRide ? (
+          <>
+            <h2>Delivery Ride Payment</h2>
+            <div className="driver-info" style={{ background: "#eef2ff", padding: "15px", borderRadius: "5px" }}>
+              <p style={{ margin: 0 }}>Payment is handled when you place the food order.</p>
+            </div>
           </>
         ) : ["driver_assigned", "picked_up", "waiting_completion_otp"].includes(rideStatus) ? (
           <>

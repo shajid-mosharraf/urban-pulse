@@ -358,6 +358,7 @@ const acceptRideByDriver = async ({ ride_id, driver_id }) => {
   const client = await getClient();
 
   let acceptedRide;
+  let restaurantChatMessage = null;
 
   try {
     await client.query("BEGIN");
@@ -444,7 +445,25 @@ const acceptRideByDriver = async ({ ride_id, driver_id }) => {
       hasPendingAssignment = false;
     }
 
-    const pickupOtp = randomOtp();
+    let pickupOtp = randomOtp();
+    try {
+      const existingOtpResult = await client.query(
+        `SELECT pickup_otp
+         FROM ride_completion_details
+         WHERE ride_id = $1
+         FOR UPDATE`,
+        [rideId]
+      );
+
+      const existingOtp = String(existingOtpResult.rows[0]?.pickup_otp || "").trim();
+      if (existingOtp) {
+        pickupOtp = existingOtp;
+      }
+    } catch (otpErr) {
+      if (!isMissingTableError(otpErr, "ride_completion_details")) {
+        throw otpErr;
+      }
+    }
 
     const updateResult = await client.query(
       `UPDATE rides
@@ -514,6 +533,53 @@ const acceptRideByDriver = async ({ ride_id, driver_id }) => {
       }
     }
 
+    try {
+      const restaurantInfo = await client.query(
+        `SELECT r.owner_id
+         FROM food_orders fo
+         JOIN restaurants r ON r.restaurant_id = fo.restaurant_id
+         WHERE fo.ride_id = $1
+         ORDER BY fo.order_time DESC
+         LIMIT 1`,
+        [rideId]
+      );
+
+      const restaurantOwnerId = Number(restaurantInfo.rows[0]?.owner_id || 0);
+      if (restaurantOwnerId > 0) {
+        const conversationRow = await client.query(
+          `SELECT conversation_id
+           FROM conversations
+           WHERE ride_id = $1
+           ORDER BY conversation_id DESC
+           LIMIT 1`,
+          [rideId]
+        );
+
+        const conversationId = Number(conversationRow.rows[0]?.conversation_id || 0);
+        const chatText = `Pickup OTP: ${pickupOtp}`;
+
+        if (conversationId > 0) {
+          await client.query(
+            `INSERT INTO messages (conversation_id, sender_id, content, timestamp)
+             VALUES ($1, $2, $3, NOW())`,
+            [conversationId, restaurantOwnerId, chatText]
+          );
+        }
+
+        restaurantChatMessage = {
+          sender_id: restaurantOwnerId,
+          sender_role: "restaurant",
+          text: chatText,
+        };
+      }
+    } catch (chatErr) {
+      const missingConversation = isMissingTableError(chatErr, "conversations");
+      const missingMessages = isMissingTableError(chatErr, "messages");
+      if (!missingConversation && !missingMessages) {
+        throw chatErr;
+      }
+    }
+
     await createNotification(
       client,
       acceptedRide.customer_id,
@@ -556,6 +622,7 @@ const acceptRideByDriver = async ({ ride_id, driver_id }) => {
     otp: {
       pickup_otp: acceptedRide.pickup_otp,
     },
+    restaurant_chat_message: restaurantChatMessage,
   };
 };
 

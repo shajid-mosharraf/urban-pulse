@@ -30,4 +30,26 @@ router.post(
 	customerController.confirmRideCompletion
 );
 
+router.get(
+	"/food/restaurants",
+	protect,
+	authorize("customer"),
+	customerController.getFoodRestaurants
+);
+
+router.get(
+	"/food/restaurants/:restaurantId/menu",
+	protect,
+	authorize("customer"),
+	customerController.getRestaurantMenu
+);
+
+router.post(
+	"/:userId/food/orders",
+	protect,
+	authorize("customer"),
+	authorizeSelfOrRoles("admin"),
+	customerController.createFoodOrder
+);
+
 module.exports = router;

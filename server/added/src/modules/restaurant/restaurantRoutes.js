@@ -17,4 +17,46 @@ router.get(
 	restaurantController.getDashboard
 );
 
+router.patch(
+	"/orders/:orderId/status",
+	protect,
+	authorize("restaurant"),
+	restaurantController.patchOrderStatus
+);
+
+router.patch(
+	"/orders/:orderId/decision",
+	protect,
+	authorize("restaurant"),
+	restaurantController.patchOrderDecision
+);
+
+router.patch(
+	"/menu/:itemId/availability",
+	protect,
+	authorize("restaurant"),
+	restaurantController.patchMenuItemAvailability
+);
+router.patch(
+	"/orders/:orderId/ready-for-delivery",
+	protect,
+	authorize("restaurant"),
+	restaurantController.patchOrderReadyForDelivery
+);
+
+
+router.get(
+	"/menu",
+	protect,
+	authorize("restaurant"),
+	restaurantController.getMenuItems
+);
+
+router.post(
+	"/menu",
+	protect,
+	authorize("restaurant"),
+	restaurantController.postMenuItem
+);
+
 module.exports = router;

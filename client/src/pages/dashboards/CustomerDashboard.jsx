@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { io } from "socket.io-client";
 import Layout from "./Layout";
 
 const API_BASE = "http://localhost:5000";
@@ -8,10 +9,10 @@ const nav = [
   { id: "home",      icon: "⌂",  label: "Dashboard", path: "/dashboard/customer" },
   { type: "section", id: "s1",   label: "Travel" },
   { id: "ride",      icon: "🚗", label: "Book a Ride", path: "/ride" },
-  { id: "ongoing",   icon: "📍", label: "Ongoing", path: "/dashboard/customer/ongoing" },
+  { id: "food",      icon: "🍔", label: "Book Delivery Ride", path: "/delivery-ride" },
+  { id: "ongoing",   icon: "📍", label: "Ongoing Trips", path: "/dashboard/customer/ongoing" },
   { id: "statistics",icon: "🕐", label: "Statistics", path: "/dashboard/customer/statistics" },
   { type: "section", id: "s2",   label: "Food & More" },
-  { id: "food",      icon: "🍔", label: "Order Food", path: "/food-service" },
   { id: "courier",   icon: "📦", label: "Send Parcel", path: "/parcel-service" },
   { id: "emergency", icon: "🏥", label: "Emergency", path: "/dashboard/customer/ambulance" },
   { type: "section", id: "s3",   label: "Account" },
@@ -149,6 +150,78 @@ function CustomerDashboard() {
     loadData();
   }, [activeSection, getHeaders, navigate, token, user?.user_id]);
 
+  useEffect(() => {
+    if (!dashboard?.activeRide?.ride_id) {
+      return undefined;
+    }
+
+    const socket = io(API_BASE, {
+      withCredentials: true,
+      transports: ["websocket", "polling"],
+    });
+
+    const rideId = dashboard.activeRide.ride_id;
+
+    socket.emit("join_ride_room", rideId);
+
+    const handleCompletionOtpReady = (payload = {}) => {
+      if (Number(payload.ride_id) !== Number(rideId)) {
+        return;
+      }
+
+      setDashboard((prev) => {
+        if (!prev?.activeRide || Number(prev.activeRide.ride_id) !== Number(rideId)) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          activeRide: {
+            ...prev.activeRide,
+            status: payload.status || prev.activeRide.status,
+            completion_otp: payload.completion_otp || prev.activeRide.completion_otp,
+          },
+        };
+      });
+
+      if (payload.completion_otp) {
+        setCompletionOtp(String(payload.completion_otp));
+      }
+    };
+
+    socket.on("delivery_completion_otp_ready", handleCompletionOtpReady);
+
+    return () => {
+      socket.off("delivery_completion_otp_ready", handleCompletionOtpReady);
+      socket.disconnect();
+    };
+  }, [dashboard?.activeRide?.ride_id]);
+
+  // Auto-refresh active ride data to fetch OTP when driver confirms
+  useEffect(() => {
+    if (!dashboard?.activeRide || dashboard.activeRide.completion_otp) {
+      return; // Don't poll if no active ride or OTP already exists
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/customer/dashboard/${user.user_id}`, {
+          headers: getHeaders(),
+          credentials: "include",
+        });
+
+        const data = await response.json();
+        if (response.ok && data?.success) {
+          setDashboard(data.data);
+        }
+      } catch (err) {
+        // Silent error on polling
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [dashboard?.activeRide, getHeaders, user?.user_id, API_BASE]);
+
   const activeRide = dashboard?.activeRide;
 
   const formatMoney = (value) => {
@@ -160,8 +233,19 @@ function CustomerDashboard() {
 
   const handleConfirmCompletion = async () => {
     if (!user?.user_id || !activeRide?.ride_id) {
+      console.warn("[Confirm] Missing user or ride ID", { userId: user?.user_id, rideId: activeRide?.ride_id });
       return;
     }
+
+    const otpToConfirm = String(completionOtp || activeRide?.completion_otp || "").trim();
+
+    if (!otpToConfirm) {
+      console.warn("[Confirm] No OTP available", { inputOtp: completionOtp, displayOtp: activeRide?.completion_otp });
+      setActionMessage("Please wait for the completion OTP to appear or enter it manually.");
+      return;
+    }
+
+    console.log("[Confirm] Sending confirmation", { rideId: activeRide.ride_id, otp: otpToConfirm, status: activeRide.status });
 
     try {
       setActionMessage("");
@@ -174,18 +258,23 @@ function CustomerDashboard() {
             Authorization: token ? `Bearer ${token}` : "",
           },
           credentials: "include",
-          body: JSON.stringify({ otp: completionOtp }),
+          body: JSON.stringify({ otp: otpToConfirm }),
         }
       );
 
+      console.log("[Confirm] Response status:", response.status);
       const data = await response.json();
+      console.log("[Confirm] Response body:", data);
+
       if (!response.ok || !data?.success) {
+        console.error("[Confirm] Backend error:", data?.message);
         throw new Error(data?.message || "Unable to confirm completion.");
       }
 
       setActionMessage("Ride completed successfully.");
       setCompletionOtp("");
     } catch (err) {
+      console.error("[Confirm] Error:", err);
       setActionMessage(err.message || "Unable to confirm completion.");
     }
   };
@@ -696,8 +785,8 @@ function CustomerDashboard() {
           <div className="section-label">Quick Actions</div>
           <div className="quick-actions">
             {[
-              { icon: "🚗", label: "Book Ride",     sub: "Car, Bike, CNG",     color: "#eff6ff", iconBg: "#dbeafe", path: "/ride" },
-              { icon: "🍔", label: "Order Food",     sub: "50+ restaurants",    color: "#fff7ed", iconBg: "#ffedd5", path: "/food-service" },
+              { icon: "🚗", label: "Book a Ride",        sub: "Car, Bike, CNG",      color: "#eff6ff", iconBg: "#dbeafe", path: "/ride" },
+              { icon: "🍔", label: "Book Delivery Ride", sub: "Food delivery trips", color: "#fff7ed", iconBg: "#ffedd5", path: "/delivery-ride" },
               { icon: "📦", label: "Send Parcel",    sub: "Fast delivery",      color: "#faf5ff", iconBg: "#ede9fe", path: "/parcel-service" },
               { icon: "🏥", label: "Emergency",      sub: "Nearest hospital",   color: "#fef2f2", iconBg: "#fee2e2", path: "/ambulance-service" },
               { icon: "📌", label: "Saved Places",   sub: `${dashboard?.savedPlaces ?? 0} saved`,      color: "#f0fdf4", iconBg: "#dcfce7" },
@@ -737,10 +826,37 @@ function CustomerDashboard() {
                         <p><strong>Status:</strong> {activeRide.status || "in_progress"}</p>
                         <p><strong>Route:</strong> {activeRide.pickup || "Pickup"} → {activeRide.dropoff || "Dropoff"}</p>
                         <p><strong>Fare:</strong> ৳ {activeRide.fare}</p>
-                        {["driver_completed", "waiting_completion_otp"].includes(String(activeRide.status || "").toLowerCase()) && (
+                        {["in_progress", "driver_completed", "waiting_completion_otp"].includes(String(activeRide.status || "").toLowerCase()) && activeRide.completion_otp && (
+                          <div style={{ marginTop: 12, padding: "10px", background: "#fff8e1", borderRadius: 8, borderLeft: "3px solid #ff9800" }}>
+                            <div style={{ fontSize: 11, color: "var(--text-light)", marginBottom: 4 }}>
+                              DELIVERY COMPLETION OTP
+                            </div>
+                            <div style={{ fontSize: 18, fontWeight: "bold", color: "#ff9800", letterSpacing: "2px", marginBottom: 8 }}>
+                              {activeRide.completion_otp}
+                            </div>
+                          </div>
+                        )}
+                        {String(activeRide.status || "").toLowerCase() === "in_progress" && !activeRide.completion_otp && (
+                          <div style={{ marginTop: 12, padding: "10px", background: "#e3f2fd", borderRadius: 8, borderLeft: "3px solid #2196f3" }}>
+                            <div style={{ fontSize: 12, color: "#1976d2", fontWeight: 500 }}>
+                              ⏳ Waiting for driver to arrive...
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--text-light)", marginTop: 4 }}>
+                              OTP will appear here once driver reaches delivery location
+                            </div>
+                          </div>
+                        )}
+                        {["driver_completed", "waiting_completion_otp"].includes(String(activeRide.status || "").toLowerCase()) && !activeRide.completion_otp && (
+                          <div style={{ marginTop: 12, padding: "10px", background: "#fff3e0", borderRadius: 8, borderLeft: "3px solid #f57c00" }}>
+                            <div style={{ fontSize: 12, color: "#e65100", fontWeight: 500 }}>
+                              🔄 Refreshing OTP...
+                            </div>
+                          </div>
+                        )}
+                        {["in_progress", "driver_completed", "waiting_completion_otp"].includes(String(activeRide.status || "").toLowerCase()) && (
                           <div style={{ marginTop: 12 }}>
                             <div style={{ fontSize: 12, color: "var(--text-light)", marginBottom: 6 }}>
-                              Enter completion OTP to finish ride
+                              Enter completion OTP to finalize delivery
                             </div>
                             <div style={{ display: "flex", gap: 8 }}>
                               <input
@@ -784,7 +900,7 @@ function CustomerDashboard() {
           {activeSection === "home" && (
             <div className="card" style={{ marginTop: 16 }}>
               <div className="card-header">
-                <div className="card-title">Recent Rides</div>
+                <div className="card-title">Recent Normal Rides</div>
               </div>
               <table className="table">
                 <thead>
@@ -824,14 +940,17 @@ function CustomerDashboard() {
           {activeSection === "home" && (
             <div className="card" style={{ marginTop: 16 }}>
               <div className="card-header">
-                <div className="card-title">Latest Food Orders</div>
+                <div className="card-title">Recent Delivery Rides</div>
               </div>
               <table className="table">
                 <thead>
                   <tr>
                     <th>Order</th>
+                    <th>Ride</th>
                     <th>Restaurant</th>
+                    <th>Route</th>
                     <th>Total</th>
+                    <th>Fare</th>
                     <th>Status</th>
                     <th>Time</th>
                   </tr>
@@ -841,15 +960,18 @@ function CustomerDashboard() {
                     (dashboard.latestFoodOrders || dashboard.recentFoodDeliveries).map((o) => (
                       <tr key={o.order_id}>
                         <td>#{o.order_id}</td>
+                        <td>{o.ride_id ? `#${o.ride_id}` : "—"}</td>
                         <td>{o.restaurant_name || "Restaurant"}</td>
+                        <td><div style={{ fontWeight: 600 }}>{o.pickup || "Pickup"} → {o.dropoff || "Dropoff"}</div></td>
                         <td>৳ {o.total_price ?? 0}</td>
+                        <td>৳ {o.fare ?? o.total_price ?? 0}</td>
                         <td><span className="pill blue">{o.status || "placed"}</span></td>
                         <td>{o.order_time ? new Date(o.order_time).toLocaleString() : "-"}</td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={5} style={{ padding: 12, color: "var(--text-light)" }}>No recent food orders.</td>
+                      <td colSpan={8} style={{ padding: 12, color: "var(--text-light)" }}>No recent delivery rides.</td>
                     </tr>
                   )}
                 </tbody>

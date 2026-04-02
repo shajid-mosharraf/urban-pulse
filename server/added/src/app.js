@@ -1,4 +1,5 @@
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 const http = require("http");
 const express = require("express");
 const cookieParser = require("cookie-parser");
@@ -92,6 +93,35 @@ io.on("connection", (socket) => {
     if (!Number.isInteger(normalizedDriverId) || normalizedDriverId <= 0) {
       return;
     }
+
+    // Initialize required roles in database on startup
+    async function initializeRoles() {
+      try {
+        const roles = ['customer', 'driver', 'restaurant', 'admin'];
+    
+        for (const roleName of roles) {
+          const result = await query(
+            `SELECT role_id FROM roles WHERE role_name = $1`,
+            [roleName]
+          );
+      
+          if (result.rows.length === 0) {
+            await query(
+              `INSERT INTO roles (role_name, role_description)
+               VALUES ($1, $2)
+               ON CONFLICT (role_name) DO NOTHING`,
+              [roleName, `${roleName} user`]
+            );
+            console.log(`✓ Role '${roleName}' created`);
+          }
+        }
+      } catch (error) {
+        console.error('❌ Failed to initialize roles:', error.message);
+      }
+    }
+
+    // Call on startup
+    initializeRoles();
 
     markDriverOnline(normalizedDriverId, socket.id);
 

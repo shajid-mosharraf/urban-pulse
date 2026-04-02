@@ -1,9 +1,20 @@
 const { getClient, query } = require("../../config/db");
+const { getIo } = require("../../realtime/socketState");
 
 const toNumber = (value) => Number(value || 0);
 
 const DRIVER_PAYOUT_RATIO = 0.97;
 
+const randomOtp = () => String(Math.floor(Math.random() * 1000000)).padStart(6, "0");
+
+const toOptionalNumber = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 const ensureWallet = async (client, userId) => {
   const existing = await client.query(
     `SELECT wallet_id, balance
@@ -42,11 +53,24 @@ const insertWalletTransaction = async (client, walletId, amount, type, descripti
 };
 
 const settleRidePayment = async (client, rideRow) => {
+  console.log("[Backend] DEBUG: Entered settleRidePayment");
   const fare = Number(rideRow.final_fare || rideRow.initial_fare || 0);
   const paymentMethod = String(rideRow.payment_method || "cash").toLowerCase();
 
-  if (fare <= 0) {
+  console.log("[Backend] Settlement calculation:", {
+    fare,
+    final_fare: rideRow.final_fare,
+    initial_fare: rideRow.initial_fare,
+    paymentMethod,
+  });
+
+  if (fare <= 0 && paymentMethod !== "cash") {
+    console.error("[Backend] ERROR: Fare is zero or negative, ride cannot be completed");
     throw { status: 400, message: "Ride fare must be greater than zero before completion." };
+  }
+
+  if (fare <= 0 && paymentMethod === "cash") {
+    console.log("[Backend] Cash payment with no pre-calculated fare - allowing completion");
   }
 
   const existingPayment = await client.query(
@@ -57,26 +81,20 @@ const settleRidePayment = async (client, rideRow) => {
     [rideRow.ride_id]
   );
 
-  if (existingPayment.rows.length) {
+  if (existingPayment.rows.length > 0) {
     return {
       amount: fare,
       method: paymentMethod,
-      driver_payout: paymentMethod === "wallet" ? fare * DRIVER_PAYOUT_RATIO : null,
+      driver_payout: paymentMethod === "wallet" ? Number((fare * DRIVER_PAYOUT_RATIO).toFixed(2)) : null,
       alreadyProcessed: true,
     };
   }
 
+  const driverWallet = await ensureWallet(client, rideRow.driver_id);
+  const driverPayout = Number((fare * DRIVER_PAYOUT_RATIO).toFixed(2));
+
   if (paymentMethod === "wallet") {
     const customerWallet = await ensureWallet(client, rideRow.customer_id);
-    if (customerWallet.balance < fare) {
-      throw {
-        status: 409,
-        message: "Insufficient wallet balance to complete this ride.",
-      };
-    }
-
-    const driverWallet = await ensureWallet(client, rideRow.driver_id);
-    const driverPayout = Number((fare * DRIVER_PAYOUT_RATIO).toFixed(2));
 
     await client.query(
       `UPDATE wallets
@@ -109,6 +127,22 @@ const settleRidePayment = async (client, rideRow) => {
       "credit",
       `Ride earning #${rideRow.ride_id} (97% payout)`
     );
+  } else {
+    await client.query(
+      `UPDATE wallets
+       SET balance = balance + $2,
+           last_updated = NOW()
+       WHERE wallet_id = $1`,
+      [driverWallet.wallet_id, driverPayout]
+    );
+
+    await insertWalletTransaction(
+      client,
+      driverWallet.wallet_id,
+      driverPayout,
+      "credit",
+      `Ride earning #${rideRow.ride_id} (cash payout)`
+    );
   }
 
   await client.query(
@@ -120,7 +154,7 @@ const settleRidePayment = async (client, rideRow) => {
   return {
     amount: fare,
     method: paymentMethod,
-    driver_payout: paymentMethod === "wallet" ? Number((fare * DRIVER_PAYOUT_RATIO).toFixed(2)) : null,
+    driver_payout: driverPayout,
     alreadyProcessed: false,
   };
 };
@@ -184,6 +218,11 @@ const getCustomerDashboardData = async (userId) => {
          r.ride_id,
          r.status,
          r.service_type,
+         CASE
+           WHEN c.courier_id IS NOT NULL THEN 'parcel'
+           WHEN fo.order_id IS NOT NULL THEN 'delivery'
+           ELSE 'normal'
+         END AS ride_kind,
          COALESCE(r.final_fare, r.initial_fare, p.amount, 0) AS fare,
          rcd.pickup_otp,
          rcd.ride_otp,
@@ -192,7 +231,11 @@ const getCustomerDashboardData = async (userId) => {
          rcd.driver_marked_complete_at,
          r.request_time,
          pu.address_name AS pickup,
+        pu.latitude AS pickup_latitude,
+        pu.longitude AS pickup_longitude,
          du.address_name AS dropoff,
+        du.latitude AS dropoff_latitude,
+        du.longitude AS dropoff_longitude,
          d.user_id AS driver_id,
          dr.first_name AS driver_first_name,
          dr.last_name AS driver_last_name,
@@ -207,6 +250,8 @@ const getCustomerDashboardData = async (userId) => {
        LEFT JOIN drivers d ON d.user_id = r.driver_id
        LEFT JOIN users dr ON dr.user_id = d.user_id
        LEFT JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id
+       LEFT JOIN food_orders fo ON fo.ride_id = r.ride_id
+       LEFT JOIN couriers c ON c.ride_id = r.ride_id
        WHERE r.customer_id = $1
          AND LOWER(r.status) NOT IN ('completed', 'cancelled')
        ORDER BY r.request_time DESC
@@ -222,6 +267,11 @@ const getCustomerDashboardData = async (userId) => {
            r.ride_id,
            r.status,
            r.service_type,
+           CASE
+             WHEN c.courier_id IS NOT NULL THEN 'parcel'
+             WHEN fo.order_id IS NOT NULL THEN 'delivery'
+             ELSE 'normal'
+           END AS ride_kind,
            COALESCE(r.final_fare, r.initial_fare, p.amount, 0) AS fare,
            NULL::VARCHAR AS pickup_otp,
            NULL::VARCHAR AS ride_otp,
@@ -230,7 +280,11 @@ const getCustomerDashboardData = async (userId) => {
            NULL::TIMESTAMP AS driver_marked_complete_at,
            r.request_time,
            pu.address_name AS pickup,
+           pu.latitude AS pickup_latitude,
+           pu.longitude AS pickup_longitude,
            du.address_name AS dropoff,
+           du.latitude AS dropoff_latitude,
+           du.longitude AS dropoff_longitude,
            d.user_id AS driver_id,
            dr.first_name AS driver_first_name,
            dr.last_name AS driver_last_name,
@@ -244,6 +298,8 @@ const getCustomerDashboardData = async (userId) => {
          LEFT JOIN drivers d ON d.user_id = r.driver_id
          LEFT JOIN users dr ON dr.user_id = d.user_id
          LEFT JOIN vehicles v ON v.vehicle_id = d.current_vehicle_id
+         LEFT JOIN food_orders fo ON fo.ride_id = r.ride_id
+         LEFT JOIN couriers c ON c.ride_id = r.ride_id
          WHERE r.customer_id = $1
            AND LOWER(r.status) NOT IN ('completed', 'cancelled')
          ORDER BY r.request_time DESC
@@ -303,7 +359,11 @@ const getCustomerDashboardData = async (userId) => {
        LEFT JOIN locations du ON du.location_id = r.dropoff_location_id
        LEFT JOIN drivers d ON d.user_id = r.driver_id
        LEFT JOIN users dr ON dr.user_id = d.user_id
+       LEFT JOIN food_orders fo ON fo.ride_id = r.ride_id
+       LEFT JOIN couriers c ON c.ride_id = r.ride_id
        WHERE r.customer_id = $1
+         AND fo.order_id IS NULL
+         AND c.courier_id IS NULL
        ORDER BY r.request_time DESC
        LIMIT 5`,
       [userId]
@@ -332,7 +392,11 @@ const getCustomerDashboardData = async (userId) => {
          LEFT JOIN locations du ON du.location_id = r.dropoff_location_id
          LEFT JOIN drivers d ON d.user_id = r.driver_id
          LEFT JOIN users dr ON dr.user_id = d.user_id
+         LEFT JOIN food_orders fo ON fo.ride_id = r.ride_id
+         LEFT JOIN couriers c ON c.ride_id = r.ride_id
          WHERE r.customer_id = $1
+           AND fo.order_id IS NULL
+           AND c.courier_id IS NULL
          ORDER BY r.request_time DESC
          LIMIT 5`,
         [userId]
@@ -342,6 +406,15 @@ const getCustomerDashboardData = async (userId) => {
     }
   }
 
+  await query(
+    `UPDATE food_orders
+     SET status = 'on_the_way'
+     WHERE customer_id = $1
+       AND LOWER(status) = 'cooking'
+       AND order_time <= (NOW() - INTERVAL '10 second')`,
+    [userId]
+  );
+
   const recentFoodDeliveriesResult = await query(
     `SELECT
        fo.order_id,
@@ -349,12 +422,17 @@ const getCustomerDashboardData = async (userId) => {
        fo.total_price,
        fo.order_time,
        fo.ride_id,
+       COALESCE(rd.final_fare, rd.initial_fare, fo.total_price, 0) AS fare,
+       pu.address_name AS pickup,
+       du.address_name AS dropoff,
        r.name AS restaurant_name,
        dr.first_name AS driver_first_name,
        dr.last_name AS driver_last_name
      FROM food_orders fo
      JOIN restaurants r ON r.restaurant_id = fo.restaurant_id
      LEFT JOIN rides rd ON rd.ride_id = fo.ride_id
+     LEFT JOIN locations pu ON pu.location_id = rd.pickup_location_id
+     LEFT JOIN locations du ON du.location_id = rd.dropoff_location_id
      LEFT JOIN drivers d ON d.user_id = rd.driver_id
      LEFT JOIN users dr ON dr.user_id = d.user_id
      WHERE fo.customer_id = $1
@@ -406,6 +484,48 @@ const getCustomerDashboardData = async (userId) => {
 
   const activeRide = activeRideResult.rows[0] || null;
 
+  if (
+    activeRide &&
+    String(activeRide.status || "").toLowerCase() === "driver_completed" &&
+    !activeRide.completion_otp
+  ) {
+    const client = await getClient();
+
+    try {
+      await client.query("BEGIN");
+
+      const otp = randomOtp();
+      const otpResult = await client.query(
+        `INSERT INTO ride_completion_details (ride_id, completion_otp, completion_mode, updated_at)
+         VALUES ($1, $2, 'waiting_customer_otp', NOW())
+         ON CONFLICT (ride_id)
+         DO UPDATE SET completion_otp = $2,
+                       completion_mode = 'waiting_customer_otp',
+                       updated_at = NOW()
+         RETURNING completion_otp`,
+        [activeRide.ride_id, otp]
+      );
+
+      activeRide.completion_otp = otpResult.rows[0]?.completion_otp || otp;
+
+      const io = getIo();
+      if (io) {
+        io.to(`ride_${activeRide.ride_id}`).emit("delivery_completion_otp_ready", {
+          ride_id: activeRide.ride_id,
+          completion_otp: activeRide.completion_otp,
+          status: activeRide.status,
+        });
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   return {
     user: {
       user_id: user.user_id,
@@ -425,6 +545,7 @@ const getCustomerDashboardData = async (userId) => {
           ride_id: activeRide.ride_id,
           status: activeRide.status,
           service_type: activeRide.service_type,
+          ride_kind: activeRide.ride_kind || "normal",
           fare: toNumber(activeRide.fare),
           pickup_otp: activeRide.pickup_otp,
           ride_otp: activeRide.ride_otp,
@@ -433,7 +554,11 @@ const getCustomerDashboardData = async (userId) => {
           driver_marked_complete_at: activeRide.driver_marked_complete_at,
           request_time: activeRide.request_time,
           pickup: activeRide.pickup,
+          pickup_latitude: activeRide.pickup_latitude,
+          pickup_longitude: activeRide.pickup_longitude,
           dropoff: activeRide.dropoff,
+          dropoff_latitude: activeRide.dropoff_latitude,
+          dropoff_longitude: activeRide.dropoff_longitude,
           driver_name: `${activeRide.driver_first_name || ""} ${activeRide.driver_last_name || ""}`.trim(),
           driver_rating_avg: toNumber(activeRide.driver_rating_avg),
           vehicle_model: activeRide.vehicle_model,
@@ -451,6 +576,7 @@ const getCustomerDashboardData = async (userId) => {
     })),
     recentRides: recentRidesResult.rows.map((ride) => ({
       ride_id: ride.ride_id,
+      ride_kind: ride.ride_kind || "normal",
       status: ride.status,
       distance_km: toNumber(ride.distance_km),
       fare: toNumber(ride.fare),
@@ -475,6 +601,9 @@ const getCustomerDashboardData = async (userId) => {
       order_time: order.order_time,
       restaurant_name: order.restaurant_name,
       ride_id: order.ride_id,
+      fare: toNumber(order.fare),
+      pickup: order.pickup,
+      dropoff: order.dropoff,
       driver_name: `${order.driver_first_name || ""} ${order.driver_last_name || ""}`.trim(),
     })),
     recentParcelDeliveries: recentParcelDeliveriesResult.rows.map((parcel) => ({
@@ -492,6 +621,9 @@ const getCustomerDashboardData = async (userId) => {
       order_time: order.order_time,
       restaurant_name: order.restaurant_name,
       ride_id: order.ride_id,
+      fare: toNumber(order.fare),
+      pickup: order.pickup,
+      dropoff: order.dropoff,
       driver_name: `${order.driver_first_name || ""} ${order.driver_last_name || ""}`.trim(),
     })),
     latestParcelDeliveries: recentParcelDeliveriesResult.rows.map((parcel) => ({
@@ -515,7 +647,10 @@ const getCustomerDashboardData = async (userId) => {
 const confirmRideCompletion = async (customerId, rideId, otp) => {
   const normalizedOtp = String(otp || "").trim();
 
+  console.log("[Backend] Confirm ride completion:", { customerId, rideId, otp, normalizedOtp });
+
   if (!/^\d{6}$/.test(normalizedOtp)) {
+    console.warn("[Backend] Invalid OTP format:", normalizedOtp);
     throw { status: 400, message: "A valid 6-digit completion OTP is required." };
   }
 
@@ -543,17 +678,27 @@ const confirmRideCompletion = async (customerId, rideId, otp) => {
       [rideId]
     );
 
+    console.log("[Backend] Ride query result:", { rowCount: rideResult.rows.length, ride: rideResult.rows[0] });
+
     if (!rideResult.rows.length) {
+      console.warn("[Backend] Ride not found");
       throw { status: 404, message: "Ride not found." };
     }
 
     const ride = rideResult.rows[0];
 
     if (Number(ride.customer_id) !== Number(customerId)) {
+      console.warn("[Backend] Customer mismatch:", { rideCustomer: ride.customer_id, requestCustomer: customerId });
       throw { status: 403, message: "You can only confirm your own ride." };
     }
 
-    if (String(ride.status || "").toLowerCase() !== "driver_completed") {
+    // Accept both "in_progress" (customer confirming with OTP sent at on_the_way)
+    // and "driver_completed" (customer confirming after driver arrives)
+    const rideStatus = String(ride.status || "").toLowerCase();
+    console.log("[Backend] Ride status check:", { status: ride.status, normalized: rideStatus });
+    
+    if (!["in_progress", "driver_completed"].includes(rideStatus)) {
+      console.warn("[Backend] Invalid ride status:", rideStatus);
       throw {
         status: 409,
         message: "Ride is not ready for customer confirmation yet.",
@@ -561,12 +706,21 @@ const confirmRideCompletion = async (customerId, rideId, otp) => {
     }
 
     const expectedOtp = String(ride.completion_otp || ride.ride_otp || "");
+    console.log("[Backend] OTP check:", { expected: expectedOtp, provided: normalizedOtp, match: normalizedOtp === expectedOtp });
+    
     if (!expectedOtp || normalizedOtp !== expectedOtp) {
+      console.warn("[Backend] OTP mismatch:", { expected: expectedOtp, provided: normalizedOtp });
       throw { status: 400, message: "Invalid completion OTP." };
     }
 
+    console.log("[Backend] BEFORE settleRidePayment call with ride:", { rideId: ride.ride_id, fare: ride.initial_fare || ride.final_fare });
+    console.log("[Backend] OTP verified, settling payment...");
+    console.log("[Backend] DEBUG: About to call settleRidePayment");
     const settlement = await settleRidePayment(client, ride);
+    console.log("[Backend] DEBUG: settleRidePayment returned");
+    console.log("[Backend] Payment settled:", settlement);
 
+    console.log("[Backend] Updating ride status to completed...");
     const rideStatusResult = await client.query(
       `UPDATE rides
        SET status = 'completed',
@@ -575,7 +729,9 @@ const confirmRideCompletion = async (customerId, rideId, otp) => {
        RETURNING ride_id, status, end_time`,
       [rideId]
     );
+    console.log("[Backend] Ride status updated:", rideStatusResult.rows[0]);
 
+    console.log("[Backend] Updating ride completion details...");
     const detailsResult = await client.query(
       `INSERT INTO ride_completion_details (
          ride_id,
@@ -596,13 +752,234 @@ const confirmRideCompletion = async (customerId, rideId, otp) => {
        RETURNING completion_mode`,
       [rideId]
     );
+    console.log("[Backend] Ride completion details updated:", detailsResult.rows[0]);
 
+    console.log("[Backend] Committing transaction...");
     await client.query("COMMIT");
+    console.log("[Backend] Transaction committed successfully");
 
     return {
       ...rideStatusResult.rows[0],
       completion_mode: detailsResult.rows[0]?.completion_mode || "customer_confirmed_otp",
       settlement,
+    };
+  } catch (err) {
+    console.error("[Backend] ERROR - Exception in confirmRideCompletion:", {
+      message: err?.message,
+      status: err?.status,
+      error: err
+    });
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+const listFoodRestaurants = async () => {
+  const result = await query(
+    `SELECT
+       r.restaurant_id,
+       r.name,
+       r.rating,
+       r.phone,
+       l.address_name,
+       l.city
+     FROM restaurants r
+     LEFT JOIN locations l ON l.location_id = r.location_id
+     WHERE COALESCE(r.is_approved, false) = true
+     ORDER BY r.name ASC`
+  );
+
+  return result.rows.map((row) => ({
+    restaurant_id: Number(row.restaurant_id),
+    name: row.name,
+    rating: toNumber(row.rating),
+    phone: row.phone,
+    address: row.address_name || null,
+    city: row.city || null,
+  }));
+};
+
+const listRestaurantMenu = async (restaurantId) => {
+  const restaurantResult = await query(
+    `SELECT restaurant_id, name
+     FROM restaurants
+     WHERE restaurant_id = $1
+       AND COALESCE(is_approved, false) = true
+     LIMIT 1`,
+    [restaurantId]
+  );
+
+  if (!restaurantResult.rows.length) {
+    throw { status: 404, message: "Restaurant not found." };
+  }
+
+  const itemsResult = await query(
+    `SELECT
+       item_id,
+       name,
+       price,
+       is_available,
+       description
+     FROM menu_items
+     WHERE restaurant_id = $1
+     ORDER BY name ASC`,
+    [restaurantId]
+  );
+
+  return {
+    restaurant: {
+      restaurant_id: Number(restaurantResult.rows[0].restaurant_id),
+      name: restaurantResult.rows[0].name,
+    },
+    items: itemsResult.rows.map((row) => ({
+      item_id: Number(row.item_id),
+      name: row.name,
+      price: toNumber(row.price),
+      is_available: Boolean(row.is_available),
+      description: row.description || "",
+    })),
+  };
+};
+
+const placeFoodOrder = async (customerId, restaurantId, items, deliveryLocation = null) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw { status: 400, message: "At least one item is required to place an order." };
+  }
+
+  const normalizedItems = items.map((item) => ({
+    item_id: Number(item?.item_id),
+    quantity: Number(item?.quantity),
+  }));
+
+  const invalidItem = normalizedItems.find(
+    (item) => !Number.isInteger(item.item_id) || item.item_id <= 0 || !Number.isInteger(item.quantity) || item.quantity <= 0
+  );
+
+  if (invalidItem) {
+    throw { status: 400, message: "Each order item must include a valid item_id and positive quantity." };
+  }
+
+  const client = await getClient();
+
+  try {
+    await client.query("BEGIN");
+
+    const restaurantResult = await client.query(
+      `SELECT restaurant_id, name
+       FROM restaurants
+       WHERE restaurant_id = $1
+         AND COALESCE(is_approved, false) = true
+       LIMIT 1`,
+      [restaurantId]
+    );
+
+    if (!restaurantResult.rows.length) {
+      throw { status: 404, message: "Restaurant not found." };
+    }
+
+    const deliveryAddressName = String(deliveryLocation?.address_name || "").trim();
+    const deliveryLat = toOptionalNumber(deliveryLocation?.latitude);
+    const deliveryLng = toOptionalNumber(deliveryLocation?.longitude);
+    const paymentMethod = String(deliveryLocation?.payment_method || "cash").toLowerCase().trim();
+
+    if (!deliveryAddressName || deliveryLat === null || deliveryLng === null) {
+      throw {
+        status: 400,
+        message: "Delivery address and GPS coordinates are required.",
+      };
+    }
+
+    if (!["cash", "wallet"].includes(paymentMethod)) {
+      throw { status: 400, message: "payment_method must be either cash or wallet." };
+    }
+
+    const locationResult = await client.query(
+      `INSERT INTO locations (address_name, city, latitude, longitude)
+       VALUES ($1, $2, $3, $4)
+       RETURNING location_id`,
+      [deliveryAddressName, "Dhaka", deliveryLat, deliveryLng]
+    );
+
+    const deliveryLocationId = Number(locationResult.rows[0].location_id);
+    await client.query(
+      `INSERT INTO saved_addresses (customer_id, location_id, label)
+       VALUES ($1, $2, 'Current delivery')
+       ON CONFLICT (customer_id, location_id) DO NOTHING`,
+      [customerId, deliveryLocationId]
+    );
+
+    const itemIds = [...new Set(normalizedItems.map((item) => item.item_id))];
+    const menuResult = await client.query(
+      `SELECT item_id, restaurant_id, name, price, is_available
+       FROM menu_items
+       WHERE item_id = ANY($1::int[])`,
+      [itemIds]
+    );
+
+    if (menuResult.rows.length !== itemIds.length) {
+      throw { status: 400, message: "One or more menu items are invalid." };
+    }
+
+    const menuMap = new Map(menuResult.rows.map((row) => [Number(row.item_id), row]));
+
+    for (const item of normalizedItems) {
+      const menuItem = menuMap.get(item.item_id);
+      if (!menuItem || Number(menuItem.restaurant_id) !== Number(restaurantId)) {
+        throw { status: 400, message: "All selected items must belong to the same restaurant." };
+      }
+
+      if (!menuItem.is_available) {
+        throw { status: 409, message: `${menuItem.name} is currently unavailable.` };
+      }
+    }
+
+    const totalPrice = normalizedItems.reduce((sum, item) => {
+      const menuItem = menuMap.get(item.item_id);
+      return sum + toNumber(menuItem.price) * item.quantity;
+    }, 0);
+
+    const orderResult = await client.query(
+      `INSERT INTO food_orders (customer_id, restaurant_id, status, total_price, payment_method, order_time)
+       VALUES ($1, $2, 'placed', $3, $4, NOW())
+       RETURNING order_id, status, total_price, payment_method, order_time`,
+      [customerId, restaurantId, totalPrice, paymentMethod]
+    );
+
+    const order = orderResult.rows[0];
+
+    for (const item of normalizedItems) {
+      const menuItem = menuMap.get(item.item_id);
+      await client.query(
+        `INSERT INTO order_details (order_id, item_id, quantity, price_at_order)
+         VALUES ($1, $2, $3, $4)`,
+        [order.order_id, item.item_id, item.quantity, menuItem.price]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      order_id: Number(order.order_id),
+      status: order.status,
+      total_price: toNumber(order.total_price),
+      payment_method: order.payment_method || paymentMethod,
+      order_time: order.order_time,
+      restaurant: {
+        restaurant_id: Number(restaurantResult.rows[0].restaurant_id),
+        name: restaurantResult.rows[0].name,
+      },
+      items: normalizedItems.map((item) => {
+        const menuItem = menuMap.get(item.item_id);
+        return {
+          item_id: item.item_id,
+          name: menuItem.name,
+          quantity: item.quantity,
+          unit_price: toNumber(menuItem.price),
+        };
+      }),
+      delivery_location_id: deliveryLocationId,
     };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -612,4 +989,10 @@ const confirmRideCompletion = async (customerId, rideId, otp) => {
   }
 };
 
-module.exports = { getCustomerDashboardData, confirmRideCompletion };
+module.exports = {
+  getCustomerDashboardData,
+  confirmRideCompletion,
+  listFoodRestaurants,
+  listRestaurantMenu,
+  placeFoodOrder,
+};

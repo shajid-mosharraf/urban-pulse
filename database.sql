@@ -92,8 +92,8 @@ CREATE TABLE rides (
     ride_id SERIAL PRIMARY KEY,
     customer_id INT REFERENCES customers(user_id),
     driver_id INT REFERENCES drivers(user_id),
-    pickup_location_id INT REFERENCES locations(location_id),
-    dropoff_location_id INT REFERENCES locations(location_id),
+    pickup_location_id INT NOT NULL REFERENCES locations(location_id),
+    dropoff_location_id INT NOT NULL REFERENCES locations(location_id),
     service_type VARCHAR(20),
     status VARCHAR(20) DEFAULT 'Requested',
     distance_km DECIMAL(5, 2),
@@ -264,7 +264,7 @@ CREATE TABLE wallet_transactions (
 CREATE TABLE hospitals (
     hospital_id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
-    location_id INT REFERENCES locations(location_id),
+    location_id INT NOT NULL REFERENCES locations(location_id),
     beds_available BOOLEAN,
     contact_no VARCHAR(20)
 );
@@ -274,7 +274,7 @@ CREATE TABLE restaurants (
     restaurant_id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     owner_id INT REFERENCES owners(user_id),
-    location_id INT REFERENCES locations(location_id),
+    location_id INT NOT NULL REFERENCES locations(location_id),
     rating DECIMAL(3, 2) DEFAULT 0.00,
     phone VARCHAR(20),
     is_approved BOOLEAN DEFAULT FALSE
@@ -296,6 +296,7 @@ CREATE TABLE food_orders (
     ride_id INT REFERENCES rides(ride_id), -- Linked to Ride (Delivery)
     status VARCHAR(20) DEFAULT 'Placed',
     total_price DECIMAL(10, 2),
+    payment_method VARCHAR(20) DEFAULT 'cash',
     order_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -319,10 +320,10 @@ CREATE TABLE roles (
 );
 
 INSERT INTO roles (role_name, role_description) VALUES
-  ('Customer', 'Regular app user'),
-  ('Driver', 'Driver user'),
-  ('Restaurant Manager', 'Manages restaurant'),
-  ('Admin', 'Platform admin')
+  ('customer', 'Regular app user'),
+  ('driver', 'Driver user'),
+  ('restaurant', 'Manages restaurant'),
+  ('admin', 'Platform admin')
 ON CONFLICT (role_name) DO NOTHING;
 
 CREATE TABLE user_role (

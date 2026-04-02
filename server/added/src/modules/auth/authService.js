@@ -30,6 +30,7 @@ const normalizeRoleName = (roleName) => {
  * @returns {Object} { accessToken, refreshToken, user }
  */
 const loginUser = async (email, password, role) => {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
   const normalizedRole = String(role || "").toLowerCase().trim();
 
   // 1. Fetch user + all their roles
@@ -42,9 +43,9 @@ const loginUser = async (email, password, role) => {
      FROM users u
      LEFT JOIN user_role ur ON u.user_id = ur.user_id
      LEFT JOIN roles      r  ON ur.role_id = r.role_id
-     WHERE u.email = $1
+     WHERE LOWER(TRIM(u.email)) = $1
      GROUP BY u.user_id`,
-    [email]
+    [normalizedEmail]
   );
 
   // 2. Account existence check
@@ -100,16 +101,10 @@ const loginUser = async (email, password, role) => {
     }
   }
 
-  // 7. Restaurant approval check
+  // 7. Restaurant profile check (approval optional for development)
   if (normalizedRole === "restaurant") {
     const restaurantResult = await query(
-      `SELECT
-         COALESCE(o.manager_approved, false) AS manager_approved,
-         COALESCE(r.is_approved, false) AS restaurant_approved
-       FROM owners o
-       LEFT JOIN restaurants r ON r.owner_id = o.user_id
-       WHERE o.user_id = $1
-       LIMIT 1`,
+      `SELECT o.user_id FROM owners o WHERE o.user_id = $1 LIMIT 1`,
       [user.user_id]
     );
 
@@ -117,14 +112,6 @@ const loginUser = async (email, password, role) => {
       throw {
         status: 403,
         message: "Restaurant manager profile not found. Please complete your registration.",
-      };
-    }
-
-    const approval = restaurantResult.rows[0];
-    if (!approval.manager_approved || !approval.restaurant_approved) {
-      throw {
-        status: 403,
-        message: "Your restaurant account is pending admin approval.",
       };
     }
   }

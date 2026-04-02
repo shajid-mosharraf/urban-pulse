@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { OpenStreetMapProvider } from "leaflet-geosearch";
 
 import "./pageDesign/Auth.css";
 
@@ -13,6 +14,7 @@ import restaurantImg from "./images/restaurant.jpg";
 function MultiRoleSignUp() {
   const [role, setRole] = useState(null);
   const navigate = useNavigate();
+  const locationSearchTimerRef = useRef(null);
 
   // 1. FORM STATE
   const [formData, setFormData] = useState({
@@ -43,8 +45,21 @@ function MultiRoleSignUp() {
     managerName: "",
     location: ""
   });
+  const [restaurantLocationCoords, setRestaurantLocationCoords] = useState(null);
+  const [restaurantLocationSuggestions, setRestaurantLocationSuggestions] = useState([]);
 
   const [profilePreview, setProfilePreview] = useState(null);
+
+  const geoProvider = useMemo(
+    () =>
+      new OpenStreetMapProvider({
+        params: {
+          countrycodes: "bd",
+          limit: 5,
+        },
+      }),
+    []
+  );
 
   // Reset role-specific data when switching roles
   useEffect(() => {
@@ -68,6 +83,71 @@ function MultiRoleSignUp() {
     } else {
       setFormData({ ...formData, [name]: value });
     }
+  };
+
+  const handleRestaurantLocationInput = (value) => {
+    setFormData((prev) => ({ ...prev, location: value }));
+    setRestaurantLocationCoords(null);
+
+    if (locationSearchTimerRef.current) {
+      clearTimeout(locationSearchTimerRef.current);
+    }
+
+    if (!value || value.trim().length < 2) {
+      setRestaurantLocationSuggestions([]);
+      return;
+    }
+
+    locationSearchTimerRef.current = setTimeout(async () => {
+      try {
+        const results = await geoProvider.search({ query: `${value}, Bangladesh` });
+        setRestaurantLocationSuggestions(results || []);
+      } catch (error) {
+        setRestaurantLocationSuggestions([]);
+      }
+    }, 350);
+  };
+
+  const selectRestaurantLocationSuggestion = (result) => {
+    setFormData((prev) => ({ ...prev, location: result.label }));
+    setRestaurantLocationCoords({
+      latitude: Number(result.y),
+      longitude: Number(result.x),
+    });
+    setRestaurantLocationSuggestions([]);
+  };
+
+  const useCurrentGpsForRestaurantLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = Number(position.coords.latitude);
+        const lng = Number(position.coords.longitude);
+
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`
+          );
+          const data = await response.json();
+          const label = data?.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+          setFormData((prev) => ({ ...prev, location: label }));
+          setRestaurantLocationCoords({ latitude: lat, longitude: lng });
+          setRestaurantLocationSuggestions([]);
+        } catch (error) {
+          setFormData((prev) => ({ ...prev, location: `${lat.toFixed(6)}, ${lng.toFixed(6)}` }));
+          setRestaurantLocationCoords({ latitude: lat, longitude: lng });
+          setRestaurantLocationSuggestions([]);
+        }
+      },
+      () => {
+        alert("Unable to fetch GPS location. Please allow location access.");
+      }
+    );
   };
 
   // 3. HANDLE SUBMIT
@@ -110,9 +190,16 @@ function MultiRoleSignUp() {
       }
 
       if (role === "restaurant") {
+        if (!restaurantLocationCoords) {
+          alert("Please pick restaurant location from suggestions or use current GPS location.");
+          return;
+        }
+
         payload.append("restaurantName", formData.restaurantName || "");
         payload.append("managerName", formData.managerName || "");
         payload.append("location", formData.location || "");
+        payload.append("restaurant_latitude", String(restaurantLocationCoords.latitude));
+        payload.append("restaurant_longitude", String(restaurantLocationCoords.longitude));
       }
 
       const response = await axios.post("http://localhost:5000/api/register", payload, {
@@ -223,7 +310,30 @@ function MultiRoleSignUp() {
                   <h4>Restaurant Details</h4>
                   <input type="text" name="restaurantName" placeholder="Restaurant Name" value={formData.restaurantName} onChange={handleChange} required />
                   <input type="text" name="managerName" placeholder="Manager Name" value={formData.managerName} onChange={handleChange} required />
-                  <input type="text" name="location" placeholder="Restaurant Location" value={formData.location} onChange={handleChange} required />
+                  <input
+                    type="text"
+                    name="location"
+                    placeholder="Search restaurant location"
+                    value={formData.location}
+                    onChange={(e) => handleRestaurantLocationInput(e.target.value)}
+                    required
+                  />
+                  <button type="button" onClick={useCurrentGpsForRestaurantLocation} style={{ marginTop: '8px' }}>
+                    Use Current GPS Location
+                  </button>
+                  {restaurantLocationSuggestions.length > 0 && (
+                    <div style={{ marginTop: '8px', border: '1px solid #ddd', borderRadius: '6px', maxHeight: '150px', overflowY: 'auto', backgroundColor: 'white' }}>
+                      {restaurantLocationSuggestions.map((item, index) => (
+                        <div
+                          key={`${item.x}-${item.y}-${index}`}
+                          onClick={() => selectRestaurantLocationSuggestion(item)}
+                          style={{ padding: '8px', cursor: 'pointer', borderBottom: '1px solid #eee', fontSize: '0.9em' }}
+                        >
+                          {item.label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

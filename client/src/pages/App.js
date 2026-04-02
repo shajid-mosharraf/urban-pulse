@@ -7,12 +7,14 @@ import SimpleNavbar from "./SimpleNavbar";
 import Home from "./Home";
 import MultiRoleLogin from "./MultiRoleLogin";
 import MultiRoleSignUp from "./MultiRoleSignUp";
-import Ride from "./Ride.js";
+import NormalRidePage from "./NormalRidePage";
+import DeliveryRidePage from "./DeliveryRidePage";
 import FoodServicePage from "./FoodService.js";
 import ParcelDeliveryPage from "./ParcelDelivery.js";
 import CustomerDashboard from "./dashboards/CustomerDashboard";
 import DriverDashboard from "./dashboards/DriverDashboard";
 import RestaurantDashboard from "./dashboards/RestaurantDashboard";
+import RestaurantMenuManager from "./RestaurantMenuManager";
 import AdminDashboard from "./dashboards/AdminDashboard";
 import RoleDashboardRedirect from "./RoleDashboardRedirect";
 
@@ -79,7 +81,8 @@ function Layout() {
         <Route path="/dashboard/customer/promos" element={<ProtectedRoute allowedRoles={["customer"]}><CustomerDashboard /></ProtectedRoute>} />
         <Route path="/dashboard/customer/ratings" element={<ProtectedRoute allowedRoles={["customer"]}><CustomerDashboard /></ProtectedRoute>} />
         <Route path="/dashboard/customer/ambulance" element={<ProtectedRoute allowedRoles={["customer"]}><CustomerDashboard /></ProtectedRoute>} />
-        <Route path="/ride" element={<ProtectedRoute allowedRoles={["customer"]}><Ride /></ProtectedRoute>} />
+        <Route path="/ride" element={<ProtectedRoute allowedRoles={["customer"]}><NormalRidePage /></ProtectedRoute>} />
+        <Route path="/delivery-ride" element={<ProtectedRoute allowedRoles={["customer"]}><DeliveryRidePage /></ProtectedRoute>} />
         <Route path="/food-service" element={<ProtectedRoute allowedRoles={["customer"]}><FoodServicePage /></ProtectedRoute>} />
         <Route path="/parcel-service" element={<ProtectedRoute allowedRoles={["customer"]}><ParcelDeliveryPage /></ProtectedRoute>} />
         <Route path="/ambulance-service" element={<ProtectedRoute allowedRoles={["customer"]}><CustomerDashboard /></ProtectedRoute>} />
@@ -98,6 +101,7 @@ function Layout() {
 
         {/* Restaurant/Admin Routes */}
         <Route path="/dashboard/restaurant" element={<ProtectedRoute allowedRoles={["restaurant"]}><RestaurantDashboard /></ProtectedRoute>} />
+        <Route path="/restaurant-menu" element={<ProtectedRoute allowedRoles={["restaurant"]}><RestaurantMenuManager /></ProtectedRoute>} />
         <Route path="/dashboard/admin" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
         <Route path="/dashboard/admin/drivers" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />
         <Route path="/dashboard/admin/restaurants" element={<ProtectedRoute allowedRoles={["admin"]}><AdminDashboard /></ProtectedRoute>} />

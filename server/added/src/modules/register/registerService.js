@@ -4,6 +4,15 @@ const { uploadToSupabase } = require("../../middlewares/uploadMiddleware");
 
 const SALT_ROUNDS = 12;
 
+const toOptionalNumber = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 // ─── Valid self-registerable roles (matching frontend values) ─────────────────
 const VALID_ROLES = ["customer", "driver", "restaurant"];
 
@@ -25,7 +34,7 @@ const registerUser = async (fields, files = {}) => {
     licenseId, licenseExpire,
     vehiclePlate, vehicleModel, vehicleType, vehicleColor,
     // Restaurant
-    restaurantName, managerName, location,
+    restaurantName, managerName, location, restaurant_latitude, restaurant_longitude,
     // Role
     role,
   } = fields;
@@ -36,6 +45,8 @@ const registerUser = async (fields, files = {}) => {
   }
 
   const normalizedRole = role.toLowerCase();
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const normalizedPhone = String(phone).trim();
 
   // ── Validate required common fields ────────────────────────────────────────
   if (!firstName || !lastName || !email || !phone || !password || !nid) {
@@ -53,6 +64,12 @@ const registerUser = async (fields, files = {}) => {
     if (!restaurantName || !location) {
       throw { status: 400, message: "Missing required restaurant fields: restaurantName, location." };
     }
+
+    const restaurantLat = toOptionalNumber(restaurant_latitude);
+    const restaurantLng = toOptionalNumber(restaurant_longitude);
+    if (restaurantLat === null || restaurantLng === null) {
+      throw { status: 400, message: "Restaurant latitude and longitude are required." };
+    }
   }
 
   const client = await getClient();
@@ -64,9 +81,9 @@ const registerUser = async (fields, files = {}) => {
     const existingUserResult = await client.query(
       `SELECT user_id, email
        FROM "users" 
-       WHERE email = $1 OR phone = $2 
+       WHERE LOWER(TRIM(email)) = $1 OR phone = $2 
        LIMIT 1`,
-      [email, phone]
+      [normalizedEmail, normalizedPhone]
     );
 
     let userId;
@@ -128,7 +145,7 @@ const registerUser = async (fields, files = {}) => {
            (first_name, last_name, email, phone, password_hash, nid, profile_picture, active, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, true, NOW(), NOW())
          RETURNING user_id`,
-        [firstName, lastName, email, phone, password_hash, nid, profilePictureUrl]
+        [firstName, lastName, normalizedEmail, normalizedPhone, password_hash, nid, profilePictureUrl]
       );
 
       userId = newUserResult.rows[0].user_id;
@@ -169,29 +186,35 @@ const registerUser = async (fields, files = {}) => {
 
 // ─── Helper: Assign role via Roles + User_Role ────────────────────────────────
 const assignRole = async (client, userId, normalizedRole) => {
-  // Map frontend role strings to DB role_name
-  const roleNameMap = {
-    customer: "Customer",
-    driver: "Driver",
-    restaurant: "Restaurant Manager",
+  // Support both legacy and current role labels stored in DB.
+  const roleAliasesMap = {
+    customer: ["customer"],
+    driver: ["driver"],
+    restaurant: ["restaurant", "restaurant manager"],
   };
 
-  const dbRoleName = roleNameMap[normalizedRole];
+  const roleAliases = roleAliasesMap[normalizedRole] || [normalizedRole];
 
   const roleResult = await client.query(
-    `SELECT role_id
-     FROM roles 
-     WHERE role_name = $1`,
-    [dbRoleName]
+    `SELECT role_id, role_name
+     FROM roles
+     WHERE LOWER(role_name) = ANY($1::text[])
+     ORDER BY role_id
+     LIMIT 1`,
+    [roleAliases.map((name) => name.toLowerCase())]
   );
 
   if (roleResult.rows.length === 0) {
-    throw { status: 400, message: `Role "${dbRoleName}" not found in database.` };
+    throw {
+      status: 400,
+      message: `Role "${normalizedRole}" not found in database. Expected one of: ${roleAliases.join(", ")}.`,
+    };
   }
 
   await client.query(
     `INSERT INTO user_role (user_id, role_id, assigned_at) 
-    VALUES ($1, $2, NOW())`,
+     VALUES ($1, $2, NOW())
+     ON CONFLICT (user_id, role_id) DO NOTHING`,
     [userId, roleResult.rows[0].role_id]
   );
 };
@@ -201,7 +224,7 @@ const insertRoleSpecificData = async (client, userId, normalizedRole, fields, fi
   const {
     licenseId, licenseExpire,
     vehiclePlate, vehicleModel, vehicleType, vehicleColor,
-    restaurantName, location, phone,
+    restaurantName, location, phone, restaurant_latitude, restaurant_longitude,
   } = fields;
 
   if (normalizedRole === "customer") {
@@ -257,6 +280,22 @@ const insertRoleSpecificData = async (client, userId, normalizedRole, fields, fi
     }
 
   } else if (normalizedRole === "restaurant") {
+    const restaurantLat = toOptionalNumber(restaurant_latitude);
+    const restaurantLng = toOptionalNumber(restaurant_longitude);
+
+    if (restaurantLat === null || restaurantLng === null) {
+      throw { status: 400, message: "Restaurant latitude and longitude are required." };
+    }
+
+    const locationResult = await client.query(
+      `INSERT INTO locations (address_name, city, latitude, longitude)
+       VALUES ($1, $2, $3, $4)
+       RETURNING location_id`,
+      [location, "Dhaka", restaurantLat, restaurantLng]
+    );
+
+    const restaurantLocationId = Number(locationResult.rows[0].location_id);
+
     // Insert into owners/restaurant manager table
     await client.query(
       `INSERT INTO "owners" (user_id, manager_approved) VALUES ($1, false) ON CONFLICT (user_id) DO NOTHING`,
@@ -265,9 +304,9 @@ const insertRoleSpecificData = async (client, userId, normalizedRole, fields, fi
 
     // Insert into Restaurant table
     await client.query(
-      `INSERT INTO "restaurants" (owner_id, name, phone, rating, is_approved)
-       VALUES ($1, $2, $3, 0, false)`,
-      [userId, restaurantName, phone]
+      `INSERT INTO "restaurants" (owner_id, name, location_id, phone, rating, is_approved)
+       VALUES ($1, $2, $3, $4, 0, false)`,
+      [userId, restaurantName, restaurantLocationId, phone]
     );
   }
 };
